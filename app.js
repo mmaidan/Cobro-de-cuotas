@@ -5,7 +5,37 @@ const db = firebase.firestore();
 
 /* ======================= ESTADO EN MEMORIA ======================= */
 let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
-let SESSION = null; // { id, email, rol, nombre, access_token }
+let SESSION = null; // { id, email, rol, nombre, access_token, loginTime }
+
+/* ======================= SEGURIDAD DE SESIÓN ======================= */
+// Por ser un sistema de cobro de dinero, la sesión se cierra sola por
+// inactividad y también tiene una duración máxima, aunque haya actividad.
+// Los valores por defecto (abajo) se pueden ajustar desde Configuración.
+const SESION_INACTIVIDAD_MIN_DEFAULT = 15;
+const SESION_MAXIMA_HORAS_DEFAULT = 8;
+let ultimaActividad = Date.now();
+function registrarActividad(){ ultimaActividad = Date.now(); }
+['mousemove','keydown','click','touchstart'].forEach(evt=>{
+  document.addEventListener(evt, registrarActividad, { passive: true });
+});
+setInterval(async ()=>{
+  if(!SESSION) return;
+  const minInactividad = (STATE.config && STATE.config.sesionInactividadMin) || SESION_INACTIVIDAD_MIN_DEFAULT;
+  const horasMaximo = (STATE.config && STATE.config.sesionMaximaHoras) || SESION_MAXIMA_HORAS_DEFAULT;
+  const ahora = Date.now();
+  const inactivo = (ahora - ultimaActividad) > minInactividad*60*1000;
+  const sesionVencida = SESSION.loginTime && (ahora - SESSION.loginTime) > horasMaximo*60*60*1000;
+  if(inactivo || sesionVencida){
+    await auth.signOut();
+    SESSION = null;
+    STATE = { config:null, alumnos:[], pagos:[], perfiles:[] };
+    UI.alertaLogin = inactivo
+      ? 'Cerramos tu sesión por inactividad, para proteger la información de cobros. Volvé a ingresar.'
+      : 'Por seguridad, tu sesión venció y hay que volver a iniciarla.';
+    render();
+  }
+}, 30000);
+
 let TAB = 'dashboard';
 let UI = { alertaMsg:null, alertaLogin:null, alertaLoginOk:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', busquedaAlumnos:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null, cursosAbiertos:{}, aniosAbiertos:{}, dashboardFiltro:null };
 
@@ -42,7 +72,7 @@ function diasEntre(fechaA, fechaB){
 /* ======================= MAPEO DB <-> APP ======================= */
 // Firestore ya guarda los campos en camelCase, así que el mapeo es casi directo.
 function mapConfigDesdeDB(c){
-  if(!c) return { montoCuota:15000, diaVencimiento:10, periodoInicio:periodoActual(), mora:{porcentajePor10Dias:10, topeBloques:3, porcentajeMensualExtra:5} };
+  if(!c) return { montoCuota:15000, diaVencimiento:10, periodoInicio:periodoActual(), mora:{porcentajePor10Dias:10, topeBloques:3, porcentajeMensualExtra:5}, sesionInactividadMin:SESION_INACTIVIDAD_MIN_DEFAULT, sesionMaximaHoras:SESION_MAXIMA_HORAS_DEFAULT };
   return {
     montoCuota: Number(c.montoCuota),
     diaVencimiento: Number(c.diaVencimiento),
@@ -51,7 +81,9 @@ function mapConfigDesdeDB(c){
       porcentajePor10Dias: Number(c.mora?.porcentajePor10Dias ?? 10),
       topeBloques: Number(c.mora?.topeBloques ?? 3),
       porcentajeMensualExtra: Number(c.mora?.porcentajeMensualExtra ?? 5)
-    }
+    },
+    sesionInactividadMin: Number(c.sesionInactividadMin ?? SESION_INACTIVIDAD_MIN_DEFAULT),
+    sesionMaximaHoras: Number(c.sesionMaximaHoras ?? SESION_MAXIMA_HORAS_DEFAULT)
   };
 }
 function mapAlumnoDesdeDB(id, a){ return { id, ...a }; }
@@ -115,7 +147,9 @@ async function establecerSesion(user){
     }
     const perfil = perfilSnap.data();
     const token = await user.getIdToken();
-    SESSION = { id: user.uid, email: user.email, rol: perfil.rol, nombre: perfil.nombre, access_token: token };
+    const loginTime = (user.metadata && user.metadata.lastSignInTime) ? new Date(user.metadata.lastSignInTime).getTime() : Date.now();
+    SESSION = { id: user.uid, email: user.email, rol: perfil.rol, nombre: perfil.nombre, access_token: token, loginTime };
+    ultimaActividad = Date.now();
     await cargarDatos();
   }catch(e){
     console.error('[gestion-cuotas] Error al establecer sesión:', e);
@@ -1067,6 +1101,21 @@ function vistaConfig(){
       </div>
     </div>
     <div class="card p-5 mt-6">
+      <h3 class="font-display font-bold mb-4 flex items-center gap-2">${icon('shield','w-4 h-4 text-gray-400')} Seguridad de sesión</h3>
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label class="lbl">Cerrar sesión sola tras inactividad (minutos)</label>
+          <input type="number" min="1" id="cfgInactividad" value="${c.sesionInactividadMin}">
+        </div>
+        <div>
+          <label class="lbl">Duración máxima de la sesión (horas)</label>
+          <input type="number" min="1" id="cfgSesionMax" value="${c.sesionMaximaHoras}">
+        </div>
+      </div>
+      <p class="text-xs text-gray-400 mt-2 mb-3">Por manejar cobros de dinero, la app pide las credenciales de nuevo pasado este tiempo, aunque el celular o la compu queden abiertos.</p>
+      <button onclick="guardarSeguridad()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold">Guardar</button>
+    </div>
+    <div class="card p-5 mt-6">
       <h3 class="font-display font-bold mb-4">Usuarios</h3>
       <table class="tbl w-full text-sm mb-4">
         <thead><tr><th class="text-left">Email</th><th class="text-left">Nombre</th><th class="text-left">Rol</th><th></th></tr></thead>
@@ -1089,6 +1138,17 @@ function vistaConfig(){
       <p class="text-xs text-gray-400 mt-2">Si tildás la casilla, la contraseña temporal que cargues arriba no hace falta compartirla: el usuario va a poder elegir la suya desde el email que le llega. Eliminar un usuario acá quita su acceso a la app; para borrarlo por completo de Authentication, hacelo desde la consola de Firebase.</p>
     </div>
   `;
+}
+async function guardarSeguridad(){
+  const sesionInactividadMin = Number(document.getElementById('cfgInactividad').value)||15;
+  const sesionMaximaHoras = Number(document.getElementById('cfgSesionMax').value)||8;
+  try{
+    await db.collection('configuracion').doc('general').set({ sesionInactividadMin, sesionMaximaHoras }, {merge:true});
+    STATE.config.sesionInactividadMin = sesionInactividadMin;
+    STATE.config.sesionMaximaHoras = sesionMaximaHoras;
+    UI.alertaMsg = 'Configuración de seguridad guardada.';
+  }catch(e){ UI.alertaMsg = 'Error: '+e.message; }
+  render();
 }
 async function guardarCuota(){
   const montoCuota = Number(document.getElementById('cfgMonto').value)||0;
