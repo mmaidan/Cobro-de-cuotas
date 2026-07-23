@@ -7,7 +7,7 @@ const db = firebase.firestore();
 let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
 let SESSION = null; // { id, email, rol, nombre, access_token }
 let TAB = 'dashboard';
-let UI = { alertaMsg:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', _modalPago:null };
+let UI = { alertaMsg:null, alertaLogin:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', _modalPago:null, sidebarAbierto:false };
 
 /* ======================= UTILIDADES ======================= */
 function fmtMoney(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0}); }
@@ -287,20 +287,22 @@ function post(){ lucide.createIcons(); }
 
 function vistaLogin(){
   return `
-  <div class="h-full w-full flex items-center justify-center" style="background:linear-gradient(135deg,#0f172a,#0d9488);">
-    <div class="card w-full max-w-sm p-8 mx-4">
-      <div class="flex items-center gap-2 mb-1">
-        ${icon('graduation-cap','w-7 h-7')}
-        <h1 class="text-xl font-display font-bold">Gestión de Cuotas</h1>
+  <div class="h-full w-full flex items-center justify-center px-4" style="background:radial-gradient(circle at 30% 20%, #7695bb 0%, #1e293f 70%);">
+    <div class="card w-full max-w-sm p-6 sm:p-8">
+      <div class="flex items-center gap-3 mb-1">
+        <img src="${window.LOGO_DATA_URL||''}" alt="Instituto San José" class="logo-img" style="background:transparent; padding:0;">
+        <div>
+          <h1 class="text-lg sm:text-xl font-display font-bold leading-tight">Gestión de Cuotas</h1>
+          <p class="text-xs text-gray-400">Instituto San José · Quines, San Luis</p>
+        </div>
       </div>
-      <p class="text-sm text-gray-500 mb-6">Control y cobro de cuotas escolares</p>
-      ${UI.alertaLogin ? `<div class="bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg p-3 mb-4">${UI.alertaLogin}</div>` : ''}
+      <p class="text-sm text-gray-500 mt-3 mb-6">Control y cobro de cuotas escolares</p>
+      ${UI.alertaLogin ? `<div class="badge-danger text-xs rounded-lg p-3 mb-4">${UI.alertaLogin}</div>` : ''}
       <form id="loginForm" onsubmit="manejarLogin(event)">
         <label class="lbl">Email</label>
         <input id="lu" type="text" class="mb-3" placeholder="tu@email.com" autofocus>
         <label class="lbl">Contraseña</label>
         <input id="lc" type="password" class="mb-1" placeholder="••••••••">
-        <p id="lerr" class="hidden text-xs text-rose-600 mt-1 mb-2">Usuario o contraseña incorrectos.</p>
         <button type="submit" id="loginBtn" class="btn-primary w-full mt-4 py-2.5 rounded-lg font-semibold text-sm">Ingresar</button>
       </form>
     </div>
@@ -332,32 +334,44 @@ function vistaPrincipal(){
     {id:'config', label:'Configuración', icono:'settings', solo:true},
   ];
   const nav = items.filter(i=>!i.solo || esSuper()).map(i=>`
-    <button onclick="TAB='${i.id}'; render();" class="nav-item ${TAB===i.id?'active':''} w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium">
+    <button onclick="TAB='${i.id}'; UI.sidebarAbierto=false; render();" class="nav-item ${TAB===i.id?'active':''} w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium">
       ${icon(i.icono,'w-4 h-4')} ${i.label}
     </button>`).join('');
 
   return `
-  <div class="flex h-full w-full">
-    <aside class="sidebar w-64 shrink-0 flex flex-col p-4">
+  <div class="flex h-full w-full relative">
+    ${UI.sidebarAbierto ? `<div class="fixed inset-0 bg-black/40 z-40 md:hidden" onclick="UI.sidebarAbierto=false; render();"></div>` : ''}
+    <aside class="sidebar w-64 shrink-0 flex flex-col p-4 fixed md:static inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-out ${UI.sidebarAbierto ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0">
       <div class="flex items-center gap-2 px-2 mb-6 mt-1">
-        ${icon('graduation-cap','w-6 h-6 text-teal-400')}
-        <span class="font-display font-bold text-white text-lg">Cuotas</span>
+        <img src="${window.LOGO_DATA_URL||''}" alt="Instituto San José" class="logo-img">
+        <div>
+          <span class="font-display font-bold text-white text-base leading-tight block">Cuotas</span>
+          <span class="text-[10px] text-slate-400 leading-tight block">Instituto San José</span>
+        </div>
+        <button onclick="UI.sidebarAbierto=false; render();" class="ml-auto md:hidden text-slate-400">${icon('x','w-5 h-5')}</button>
       </div>
       <nav class="space-y-1 flex-1">${nav}</nav>
       <div class="border-t border-white/10 pt-3 px-2">
         <p class="text-xs text-slate-400">${SESSION.nombre}</p>
-        <p class="text-xs text-teal-400 font-semibold mb-2">${SESSION.rol==='super'?'Superusuario':'Cobrador/a'}</p>
+        <p class="text-xs font-semibold mb-2" style="color:#8fb0d6">${SESSION.rol==='super'?'Superusuario':'Cobrador/a'}</p>
         <button onclick="logout()" class="text-xs text-slate-300 hover:text-white flex items-center gap-1">${icon('log-out','w-3.5 h-3.5')} Cerrar sesión</button>
       </div>
     </aside>
-    <main class="flex-1 overflow-y-auto p-8">
-      ${UI.alertaMsg ? `<div class="card border-teal-200 bg-teal-50 px-4 py-3 mb-5 flex items-center justify-between text-sm text-teal-800"><span>${UI.alertaMsg}</span><button onclick="UI.alertaMsg=null; render();" class="text-teal-600">${icon('x','w-4 h-4')}</button></div>` : ''}
-      ${ TAB==='dashboard' ? vistaDashboard() :
-         TAB==='alumnos' ? vistaAlumnos() :
-         TAB==='cobros' ? vistaCobros() :
-         TAB==='alertas' ? vistaAlertas() :
-         TAB==='config' ? vistaConfig() : '' }
-    </main>
+    <div class="flex-1 flex flex-col min-w-0">
+      <header class="md:hidden flex items-center gap-3 px-4 py-3 border-b bg-white sticky top-0 z-30" style="border-color:var(--border)">
+        <button onclick="UI.sidebarAbierto=true; render();" class="text-gray-600">${icon('menu','w-6 h-6')}</button>
+        <img src="${window.LOGO_DATA_URL||''}" alt="" class="logo-img" style="width:28px;height:30px;">
+        <span class="font-display font-bold text-sm">Gestión de Cuotas</span>
+      </header>
+      <main class="flex-1 overflow-y-auto p-4 md:p-8">
+        ${UI.alertaMsg ? `<div class="card px-4 py-3 mb-5 flex items-center justify-between text-sm" style="border-color:#cfe0d4; background:#f0f6f0; color:var(--ok)"><span>${UI.alertaMsg}</span><button onclick="UI.alertaMsg=null; render();" style="color:var(--ok)">${icon('x','w-4 h-4')}</button></div>` : ''}
+        ${ TAB==='dashboard' ? vistaDashboard() :
+           TAB==='alumnos' ? vistaAlumnos() :
+           TAB==='cobros' ? vistaCobros() :
+           TAB==='alertas' ? vistaAlertas() :
+           TAB==='config' ? vistaConfig() : '' }
+      </main>
+    </div>
   </div>
   ${UI.importPreview ? modalImportPreview() : ''}
   ${UI._modalPago ? modalPago() : ''}
@@ -387,10 +401,10 @@ function vistaDashboard(){
     <h2 class="text-2xl font-display font-bold mb-1">Panel general</h2>
     <p class="text-sm text-gray-500 mb-6">${mesNombre(periodoAct)}</p>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-teal-50 text-teal-600')}
-      ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-emerald-50 text-emerald-600')}
-      ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-amber-50 text-amber-600')}
-      ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-rose-50 text-rose-600')}
+      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#eaf1f7] text-[#46658a]')}
+      ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-[#eef5ec] text-[#5b8a53]')}
+      ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-[#faf1de] text-[#b17d2e]')}
+      ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-[#fbe9e5] text-[#a8493a]')}
     </div>
     <div class="card p-5">
       <h3 class="font-display font-bold mb-4">Últimos cobros registrados</h3>
@@ -442,7 +456,7 @@ function vistaAlumnos(){
             <td>${a.curso||'-'}</td>
             <td>${a.turno||'-'}</td>
             <td class="text-xs text-gray-500">${a.tutorApellido||''} ${a.tutorNombre||''}<br>${a.telefonoTutor||a.telefono||''}</td>
-            <td class="text-right ${r.totalAdeudado>0?'text-rose-600 font-semibold':'text-gray-400'}">${r.totalAdeudado>0?fmtMoney(r.totalAdeudado):'—'}</td>
+            <td class="text-right ${r.totalAdeudado>0?'text-[#a8493a] font-semibold':'text-gray-400'}">${r.totalAdeudado>0?fmtMoney(r.totalAdeudado):'—'}</td>
             <td class="text-center">${badge}</td>
           </tr>`;
         }).join('')}
@@ -472,7 +486,7 @@ function vistaCobros(){
         return `<div class="card p-4">
           <div class="flex items-center justify-between mb-3">
             <div><p class="font-medium text-sm">${a.apellidos}, ${a.nombres}</p><p class="text-xs text-gray-400">${a.curso||''} · DNI ${a.dni||'-'}</p></div>
-            <p class="text-sm font-semibold text-rose-600">${fmtMoney(r.totalAdeudado)} adeudado</p>
+            <p class="text-sm font-semibold text-[#a8493a]">${fmtMoney(r.totalAdeudado)} adeudado</p>
           </div>
           <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
             ${r.pendientes.map(c=>`
@@ -480,7 +494,7 @@ function vistaCobros(){
                 <div>
                   <p class="font-semibold text-sm">${mesNombre(c.periodo)}</p>
                   <p class="text-gray-500">Vence ${fmtFecha(c.vencimiento)}${c.diasAtraso>0?` · ${c.diasAtraso} días de atraso`:''}</p>
-                  <p class="mt-1">${c.pct>0?`<span class="text-rose-600 font-medium">+${c.pct}% mora</span> · `:''}<span class="font-semibold">${fmtMoney(c.montoConMora)}</span></p>
+                  <p class="mt-1">${c.pct>0?`<span class="text-[#a8493a] font-medium">+${c.pct}% mora</span> · `:''}<span class="font-semibold">${fmtMoney(c.montoConMora)}</span></p>
                 </div>
                 <button onclick='abrirModalPago("${a.id}","${c.periodo}")' class="btn-primary px-3 py-1.5 rounded-md font-semibold">Cobrar</button>
               </div>
@@ -526,7 +540,7 @@ function vistaAlertas(){
   return `
     <h2 class="text-2xl font-display font-bold mb-1">Alertas de mora</h2>
     <p class="text-sm text-gray-500 mb-6">Alumnos con cuotas pendientes hace más de un mes (30+ días de atraso).</p>
-    ${conAlerta.length===0 ? `<div class="card p-8 text-center text-gray-400">${icon('check-circle-2','w-8 h-8 mx-auto mb-2 text-emerald-400')}<p>No hay alumnos con más de un mes de mora.</p></div>` : `
+    ${conAlerta.length===0 ? `<div class="card p-8 text-center text-gray-400">${icon('check-circle-2','w-8 h-8 mx-auto mb-2 text-[#6b9a63]')}<p>No hay alumnos con más de un mes de mora.</p></div>` : `
     <div class="space-y-3">
       ${conAlerta.sort((x,y)=>y.r.maxAtraso-x.r.maxAtraso).map(({a,r})=>`
         <div class="card p-4 border-l-4" style="border-left-color:var(--danger)">
@@ -536,7 +550,7 @@ function vistaAlertas(){
               <p class="text-xs text-gray-500 mt-0.5">Tutor: ${a.tutorApellido||''} ${a.tutorNombre||''} · Tel: ${a.telefonoTutor||a.telefono||'sin dato'}</p>
             </div>
             <div class="text-right">
-              <p class="text-rose-600 font-bold">${fmtMoney(r.totalAdeudado)}</p>
+              <p class="text-[#a8493a] font-bold">${fmtMoney(r.totalAdeudado)}</p>
               <p class="text-xs text-gray-500">${r.maxAtraso} días de atraso · ${r.cantidadPendiente} cuota(s)</p>
             </div>
           </div>
@@ -580,7 +594,7 @@ function vistaConfig(){
         <thead><tr><th class="text-left">Email</th><th class="text-left">Nombre</th><th class="text-left">Rol</th><th></th></tr></thead>
         <tbody>${(STATE.perfiles||[]).map(u=>`
           <tr><td>${u.email}</td><td>${u.nombre}</td><td>${u.rol==='super'?'Superusuario':'Cobrador/a'}</td>
-          <td class="text-right">${u.id!==SESSION.id?`<button onclick="eliminarUsuario('${u.id}')" class="text-rose-500 text-xs">Eliminar</button>`:''}</td></tr>
+          <td class="text-right">${u.id!==SESSION.id?`<button onclick="eliminarUsuario('${u.id}')" class="text-[#a8493a] text-xs">Eliminar</button>`:''}</td></tr>
         `).join('')}</tbody>
       </table>
       <div class="grid sm:grid-cols-4 gap-2">

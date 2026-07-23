@@ -15,11 +15,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lucide@latest"></script>
 <style>
+  /* Paleta derivada del escudo del Instituto San José:
+     azul del panel -> acciones principales · dorado de la antorcha -> mora en curso
+     verde de las hojas -> al día · rojo del borde -> mora vencida / alertas */
   :root{
-    --bg:#f5f6f8; --panel:#ffffff; --ink:#111827; --muted:#6b7280;
-    --sidebar:#0f172a; --sidebar-ink:#cbd5e1;
-    --accent:#0d9488; --accent-dark:#0f766e;
-    --warn:#d97706; --danger:#e11d48; --ok:#16a34a; --border:#e5e7eb;
+    --bg:#f8f4ec; --panel:#ffffff; --ink:#332b22; --muted:#8a8073;
+    --sidebar:#1e293f; --sidebar-ink:#c7d0e3;
+    --accent:#5b7da6; --accent-dark:#46658a;
+    --warn:#c98f35; --danger:#bb5847; --ok:#6b9a63; --border:#e8e0d0;
   }
   *{font-family:'Inter',sans-serif;}
   h1,h2,h3,.font-display{font-family:'Sora',sans-serif;}
@@ -31,26 +34,32 @@
   .card{background:var(--panel); border:1px solid var(--border); border-radius:14px;}
   .btn-primary{background:var(--accent); color:#fff;}
   .btn-primary:hover{background:var(--accent-dark);}
-  .badge-ok{background:#dcfce7; color:var(--ok);}
-  .badge-warn{background:#fef3c7; color:var(--warn);}
-  .badge-danger{background:#ffe4e6; color:var(--danger);}
-  .badge-muted{background:#f1f5f9; color:var(--muted);}
+  .badge-ok{background:#e6f0e4; color:var(--ok);}
+  .badge-warn{background:#faf0dd; color:var(--warn);}
+  .badge-danger{background:#fae5e1; color:var(--danger);}
+  .badge-muted{background:#f1eee6; color:var(--muted);}
   table.tbl th{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600;}
   table.tbl td, table.tbl th{padding:10px 14px; border-bottom:1px solid var(--border);}
-  table.tbl tr:hover td{background:#fafbfc;}
-  .modal-bg{background:rgba(15,23,42,.55);}
+  table.tbl tr:hover td{background:#faf8f3;}
+  .modal-bg{background:rgba(30,41,63,.55);}
   ::-webkit-scrollbar{width:8px; height:8px;}
-  ::-webkit-scrollbar-thumb{background:#cbd5e1; border-radius:8px;}
+  ::-webkit-scrollbar-thumb{background:#d8cfbe; border-radius:8px;}
   input[type=text], input[type=number], input[type=date], input[type=month], input[type=password], select{
     border:1px solid var(--border); border-radius:8px; padding:8px 10px; width:100%; font-size:14px;
   }
   input:focus, select:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:transparent;}
   label.lbl{font-size:12px; font-weight:600; color:var(--muted); display:block; margin-bottom:4px;}
+  .logo-img{width:40px; height:44px; object-fit:contain; border-radius:8px; background:#fff; padding:3px;}
+  @media (max-width:767px){
+    table.tbl{font-size:12px;}
+    table.tbl td, table.tbl th{padding:8px 10px;}
+  }
 </style>
 </head>
 <body class="h-screen w-screen overflow-hidden">
 <div id="app" class="h-full w-full"></div>
 <script src="config.js"></script>
+<script src="logo.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
