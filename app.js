@@ -416,25 +416,25 @@ function post(){ lucide.createIcons(); }
 function vistaLogin(){
   return `
   <div class="h-full w-full flex flex-col md:flex-row overflow-y-auto">
-    <div class="md:w-[42%] md:min-h-full flex flex-col justify-between px-8 py-10 md:py-14 shrink-0" style="background:radial-gradient(circle at 25% 15%, #c98979 0%, var(--sidebar-2) 65%);">
-      <div class="flex items-center gap-3">
+    <div class="login-hero md:w-[42%] md:min-h-full flex flex-col justify-between px-8 py-10 md:py-14 shrink-0" style="background-image:radial-gradient(circle at 25% 15%, #c98979 0%, var(--sidebar-2) 65%);">
+      <div class="flex items-center gap-3 anim-fade-slide">
         <img src="${window.LOGO_DATA_URL||''}" alt="Instituto San José" class="logo-img" style="width:48px;height:52px;">
         <div>
           <p class="font-display font-bold text-white text-lg leading-tight">Instituto San José</p>
           <p class="text-xs" style="color:#d9b8ab">Quines, San Luis</p>
         </div>
       </div>
-      <div class="hidden md:block mt-10">
+      <div class="hidden md:block mt-10 anim-fade-slide stagger-2">
         <h1 class="font-display font-bold text-3xl text-white leading-tight mb-3">Gestión de<br>Cuotas</h1>
         <p class="text-sm max-w-xs" style="color:#e3d3ca">Control y cobro de cuotas escolares en efectivo o transferencia, con alertas de mora y estadísticas al día.</p>
       </div>
-      <p class="text-[11px] hidden md:block" style="color:#a08e83">Desarrollado por Prof. Maidan Marcos Exequiel</p>
+      <p class="text-[11px] hidden md:block anim-fade stagger-4" style="color:#a08e83">Desarrollado por Prof. Maidan Marcos Exequiel</p>
     </div>
     <div class="flex-1 flex items-center justify-center px-4 py-10 md:py-4">
-      <div class="w-full max-w-sm">
+      <div class="w-full max-w-sm anim-fade-slide stagger-2">
         <h2 class="font-display font-bold text-xl mb-1">Iniciar sesión</h2>
         <p class="text-sm text-gray-500 mb-6">Ingresá con tu cuenta para continuar.</p>
-        ${UI.alertaLogin ? `<div class="badge-danger text-xs rounded-lg p-3 mb-4">${UI.alertaLogin}</div>` : ''}
+        ${UI.alertaLogin ? `<div class="badge-danger text-xs rounded-lg p-3 mb-4 anim-slide-down">${UI.alertaLogin}</div>` : ''}
         <form id="loginForm" onsubmit="manejarLogin(event)">
           <label class="lbl">Email</label>
           <input id="lu" type="text" class="mb-3" placeholder="tu@email.com" autofocus>
@@ -506,7 +506,8 @@ function vistaPrincipal(){
         <span class="font-display font-bold text-sm">Gestión de Cuotas</span>
       </header>
       <main class="flex-1 overflow-y-auto p-4 md:p-8">
-        ${UI.alertaMsg ? `<div class="card px-4 py-3 mb-5 flex items-center justify-between text-sm" style="border-color:#cfe0d4; background:#f0f6f0; color:var(--ok)"><span>${UI.alertaMsg}</span><button onclick="UI.alertaMsg=null; render();" style="color:var(--ok)">${icon('x','w-4 h-4')}</button></div>` : ''}
+        ${UI.alertaMsg ? `<div class="card px-4 py-3 mb-5 flex items-center justify-between text-sm anim-slide-down" style="border-color:#cfe0d4; background:#f0f6f0; color:var(--ok)"><span>${UI.alertaMsg}</span><button onclick="UI.alertaMsg=null; render();" style="color:var(--ok)">${icon('x','w-4 h-4')}</button></div>` : ''}
+        <div class="anim-fade-slide" data-tab="${TAB}">
         ${ TAB==='dashboard' ? vistaDashboard() :
            TAB==='alumnos' ? vistaAlumnos() :
            TAB==='cobros' ? vistaCobros() :
@@ -514,6 +515,7 @@ function vistaPrincipal(){
            TAB==='estadisticas' ? vistaEstadisticas() :
            TAB==='alertas' ? vistaAlertas() :
            TAB==='config' ? vistaConfig() : '' }
+        </div>
       </main>
     </div>
   </div>
@@ -535,8 +537,8 @@ function vistaDashboard(){
   });
   const recaudadoMes = STATE.pagos.filter(p=>p.fecha.slice(0,7)===periodoAct).reduce((s,p)=>s+p.montoPagado,0);
 
-  const kpi = (label, valor, iconoNombre, colorClass, filtro, accentColor)=>`
-    <div class="card kpi-card p-5 flex items-center gap-4 ${filtro?'cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition':''}" style="--kpi-color:${accentColor}; ${UI.dashboardFiltro===filtro && filtro?'box-shadow:0 0 0 2px var(--accent);':''}" ${filtro?`onclick="UI.dashboardFiltro=(UI.dashboardFiltro==='${filtro}'?null:'${filtro}'); render();"`:''}>
+  const kpi = (label, valor, iconoNombre, colorClass, filtro, accentColor, stagger)=>`
+    <div class="card kpi-card anim-fade-slide ${stagger} p-5 flex items-center gap-4 ${filtro?'cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition':''}" style="--kpi-color:${accentColor}; ${UI.dashboardFiltro===filtro && filtro?'box-shadow:0 0 0 2px var(--accent);':''}" ${filtro?`onclick="UI.dashboardFiltro=(UI.dashboardFiltro==='${filtro}'?null:'${filtro}'); render();"`:''}>
       <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${colorClass}">${icon(iconoNombre,'w-5 h-5')}</div>
       <div><p class="text-xs text-gray-500 font-medium">${label}</p><p class="text-xl font-display font-bold">${valor}</p></div>
     </div>`;
@@ -545,10 +547,10 @@ function vistaDashboard(){
     <h2 class="text-2xl font-display font-bold mb-1">Panel general</h2>
     <p class="text-sm text-gray-500 mb-6">${mesNombre(periodoAct)} · hacé clic en una tarjeta para filtrar</p>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#f6ece9] text-[#8a3c30]', null, '#8a3c30')}
-      ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-[#eef5ec] text-[#5b8a53]', 'alDia', '#6b9a63')}
-      ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-[#faf1de] text-[#b17d2e]', 'enMora', '#c98f35')}
-      ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-[#fbe9e5] text-[#a8493a]', 'mora1mes', '#a1483a')}
+      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#f6ece9] text-[#8a3c30]', null, '#8a3c30', 'stagger-1')}
+      ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-[#eef5ec] text-[#5b8a53]', 'alDia', '#6b9a63', 'stagger-2')}
+      ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-[#faf1de] text-[#b17d2e]', 'enMora', '#c98f35', 'stagger-3')}
+      ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-[#fbe9e5] text-[#a8493a]', 'mora1mes', '#a1483a', 'stagger-4')}
     </div>
     ${UI.dashboardFiltro ? panelFiltroDashboard() : `
     <div class="card p-5">
@@ -650,12 +652,12 @@ function vistaAlumnos(){
       <div class="mb-4">
         <button onclick="UI.aniosAbiertos['${g.anio}']=!UI.aniosAbiertos['${g.anio}']; render();" class="w-full flex items-center justify-between text-left font-display font-bold text-sm text-gray-600 mb-2 px-1">
           <span class="flex items-center gap-2">${icon('graduation-cap','w-4 h-4 text-gray-400')} ${g.anio} <span class="text-gray-400 font-normal">(${g.alumnos.length} alumnos)</span></span>
-          ${icon(abierto?'chevron-up':'chevron-down','w-4 h-4 text-gray-400')}
+          <span style="display:inline-flex; transition:transform .2s ease; transform:rotate(${abierto?'180deg':'0deg'});">${icon('chevron-down','w-4 h-4 text-gray-400')}</span>
         </button>
-        ${abierto ? divisiones.map(d=>{
+        ${abierto ? divisiones.map((d,i)=>{
           const nombreDivision = d.curso.includes(' - ') ? 'División '+d.curso.split(' - ')[1] : d.curso;
           return `
-          <div class="mb-3">
+          <div class="mb-3 anim-fade-slide" style="animation-delay:${i*0.04}s">
             <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 px-1">${nombreDivision}</p>
             <div class="card divide-y" style="border-color:var(--border)">
               ${d.alumnos.map(a=>filaAlumnoInfo(a)).join('')}
@@ -729,11 +731,11 @@ function vistaCobros(){
       const lista = abierto ? g.todos : g.deudores;
       return `
       <div class="mb-4">
-        <button onclick="UI.cursosAbiertos['${g.curso}']=!UI.cursosAbiertos['${g.curso}']; render();" class="w-full flex items-center justify-between text-left font-display font-bold text-sm text-gray-600 mb-2 px-1">
+        <button onclick="UI.cursosAbiertos['${g.curso}']=!UI.cursosAbiertos['${g.curso}']; render();" class="w-full flex items-center justify-between text-left font-display font-bold text-sm text-gray-600 mb-2 px-1 group">
           <span class="flex items-center gap-2">${icon('layers','w-4 h-4 text-gray-400')} ${g.curso} <span class="text-gray-400 font-normal">(${g.deudores.length} con deuda · ${g.todos.length} en total)</span></span>
-          ${icon(abierto?'chevron-up':'chevron-down','w-4 h-4 text-gray-400')}
+          <span style="display:inline-flex; transition:transform .2s ease; transform:rotate(${abierto?'180deg':'0deg'});">${icon('chevron-down','w-4 h-4 text-gray-400')}</span>
         </button>
-        <div class="card divide-y" style="border-color:var(--border)">
+        <div class="card divide-y anim-fade-slide" style="border-color:var(--border)">
           ${lista.length===0 ? `<p class="text-xs text-gray-400 p-4">${abierto?'No hay alumnos en este curso.':'Nadie debe en este curso. Hacé clic arriba para ver la división completa.'}</p>` :
             lista.map(a=>filaCobroAlumno(a)).join('')}
         </div>
@@ -895,7 +897,7 @@ function graficoTortaAlumnos(){
     <div class="card p-5 mb-6">
       <h3 class="font-display font-bold mb-4">Distribución de alumnos</h3>
       <div class="flex flex-wrap items-center gap-8">
-        <div class="shrink-0" style="width:140px;height:140px;position:relative;">
+        <div class="shrink-0 anim-fade-scale" style="width:140px;height:140px;position:relative;">
           <div style="position:absolute; top:0; left:0; right:0; bottom:0; border-radius:9999px; background:${gradiente};"></div>
           <div style="position:absolute; top:24px; left:24px; right:24px; bottom:24px; border-radius:9999px; background:var(--panel); display:flex; align-items:center; justify-content:center; text-align:center;">
             <div><p class="text-lg font-display font-bold">${d.total}</p><p class="text-[10px] text-gray-400">alumnos activos</p></div>
@@ -961,8 +963,8 @@ function modalPago(){
   const a = STATE.alumnos.find(x=>x.id===alumnoId);
   const c = cuotasDeAlumno(alumnoId).find(x=>x.periodo===periodo);
   return `
-  <div class="fixed inset-0 modal-bg flex items-center justify-center z-50" onclick="if(event.target===this) cerrarModalPago()">
-    <div class="card w-full max-w-md p-6">
+  <div class="fixed inset-0 modal-bg anim-fade flex items-center justify-center z-50" onclick="if(event.target===this) cerrarModalPago()">
+    <div class="card anim-pop w-full max-w-md p-6">
       <h3 class="font-display font-bold text-lg mb-1">Registrar cobro</h3>
       <p class="text-sm text-gray-500 mb-4">${a.apellidos}, ${a.nombres} — ${mesNombre(periodo)}</p>
       <div class="bg-gray-50 rounded-lg p-3 mb-4 text-sm space-y-1">
@@ -992,7 +994,7 @@ function vistaAlertas(){
       <button onclick="exportarDeudoresPDF()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">${icon('file-down','w-4 h-4')} Exportar deudores (PDF)</button>
     </div>
     <p class="text-sm text-gray-500 mb-6">Alumnos con cuotas pendientes hace más de un mes (30+ días de atraso). El PDF exporta a todos los que tienen alguna deuda, no solo estos.</p>
-    ${conAlerta.length===0 ? `<div class="card p-8 text-center text-gray-400">${icon('check-circle-2','w-8 h-8 mx-auto mb-2 text-[#6b9a63]')}<p>No hay alumnos con más de un mes de mora.</p></div>` : `
+    ${conAlerta.length===0 ? `<div class="card p-8 text-center text-gray-400 anim-fade-slide"><span class="inline-block anim-check">${icon('check-circle-2','w-8 h-8 mx-auto mb-2 text-[#6b9a63]')}</span><p>No hay alumnos con más de un mes de mora.</p></div>` : `
     <div class="space-y-3">
       ${conAlerta.sort((x,y)=>y.r.maxAtraso-x.r.maxAtraso).map(({a,r})=>`
         <div class="card p-4 border-l-4" style="border-left-color:var(--danger)">
@@ -1116,8 +1118,8 @@ async function eliminarUsuario(id){
 function modalImportPreview(){
   const filas = UI.importPreview;
   return `
-  <div class="fixed inset-0 modal-bg flex items-center justify-center z-50">
-    <div class="card w-full max-w-3xl max-h-[85vh] flex flex-col p-6">
+  <div class="fixed inset-0 modal-bg anim-fade flex items-center justify-center z-50">
+    <div class="card anim-pop w-full max-w-3xl max-h-[85vh] flex flex-col p-6">
       <h3 class="font-display font-bold text-lg mb-1">Previsualización de importación</h3>
       <p class="text-sm text-gray-500 mb-4">${filas.length} filas detectadas. Revisá antes de confirmar.</p>
       <div class="overflow-auto border rounded-lg flex-1" style="border-color:var(--border)">

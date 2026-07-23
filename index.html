@@ -72,6 +72,29 @@
   .safe-bottom{padding-bottom:env(safe-area-inset-bottom);}
   .kpi-card{position:relative; overflow:hidden;}
   .kpi-card::before{content:'';position:absolute; top:0; left:0; right:0; height:3px; background:var(--kpi-color, transparent);}
+
+  /* ---------- Animaciones ---------- */
+  @keyframes fadeSlideIn{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
+  @keyframes fadeScaleIn{ from{opacity:0; transform:scale(.95);} to{opacity:1; transform:scale(1);} }
+  @keyframes popIn{ 0%{opacity:0; transform:scale(.92);} 65%{opacity:1; transform:scale(1.015);} 100%{opacity:1; transform:scale(1);} }
+  @keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+  @keyframes slideDownFade{ from{opacity:0; transform:translateY(-10px);} to{opacity:1; transform:translateY(0);} }
+  @keyframes gradientDrift{ 0%,100%{background-position:0% 30%;} 50%{background-position:100% 70%;} }
+  @keyframes checkPulse{ 0%{transform:scale(.9); opacity:.6;} 60%{transform:scale(1.08);} 100%{transform:scale(1); opacity:1;} }
+
+  .anim-fade-slide{ animation:fadeSlideIn .35s cubic-bezier(.16,1,.3,1) both; }
+  .anim-fade-scale{ animation:fadeScaleIn .2s ease both; }
+  .anim-pop{ animation:popIn .28s cubic-bezier(.16,1,.3,1) both; }
+  .anim-fade{ animation:fadeIn .2s ease both; }
+  .anim-slide-down{ animation:slideDownFade .3s cubic-bezier(.16,1,.3,1) both; }
+  .anim-check{ animation:checkPulse .35s cubic-bezier(.34,1.56,.64,1) both; }
+  .stagger-1{ animation-delay:.04s; } .stagger-2{ animation-delay:.09s; }
+  .stagger-3{ animation-delay:.14s; } .stagger-4{ animation-delay:.19s; }
+  .login-hero{ background-size:180% 180%; animation:gradientDrift 10s ease-in-out infinite; }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation:none !important; transition:none !important; }
+  }
   @media (max-width:767px){
     table.tbl{font-size:12px;}
     table.tbl td, table.tbl th{padding:8px 10px;}
