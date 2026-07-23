@@ -526,7 +526,7 @@ function vistaPrincipal(){
   const items = [
     {id:'dashboard', label:'Panel', icono:'layout-dashboard', solo:false},
     {id:'alumnos', label:'Alumnos', icono:'users', solo:false},
-    {id:'cobros', label:'Sistema de cobros', icono:'wallet', solo:false},
+    {id:'cobros', label:'Cobranza', icono:'wallet', solo:false},
     {id:'caja', label:'Caja', icono:'archive', solo:false},
     {id:'estadisticas', label:'Estadísticas', icono:'bar-chart-3', solo:false},
     {id:'alertas', label:'Alertas de mora', icono:'alert-triangle', solo:false},
@@ -544,7 +544,7 @@ function vistaPrincipal(){
       <div class="flex items-center gap-2 px-2 mb-6 mt-1">
         <img src="${window.LOGO_DATA_URL||''}" alt="Instituto San José" class="logo-img">
         <div>
-          <span class="font-display font-bold text-white text-base leading-tight block">Cuotas</span>
+          <span class="font-display font-bold text-white text-sm leading-tight block">Gestión de Cuotas</span>
           <span class="text-[10px] text-slate-400 leading-tight block">Instituto San José</span>
         </div>
         <button onclick="UI.sidebarAbierto=false; render();" class="ml-auto md:hidden text-slate-400">${icon('x','w-5 h-5')}</button>
@@ -780,7 +780,7 @@ function vistaCobros(){
     deudores: g.alumnos.filter(a=>resumenAlumno(a.id).cantidadPendiente>0)
   }));
   return `
-    <h2 class="text-2xl font-display font-bold mb-1">Sistema de cobros de alumnos</h2>
+    <h2 class="text-2xl font-display font-bold mb-1">Cobranza de cuotas</h2>
     <p class="text-sm text-gray-500 mb-4">Agrupados por curso. Por defecto se muestran los que tienen deuda; hacé clic en un curso para ver la división completa.</p>
     <input type="text" placeholder="Buscar alumno por nombre o DNI..." value="${UI.busqueda||''}" oninput="UI.busqueda=this.value; render();" class="max-w-sm mb-5">
     ${grupos.length===0 ? `<p class="text-gray-400 text-sm">No se encontraron alumnos.</p>` :
