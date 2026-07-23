@@ -1,15 +1,21 @@
-// Reemplazá estos valores por los de TU proyecto de Firebase.
-// Los encontrás en: Firebase Console > Configuración del proyecto (ícono de tuerca)
-// > General > "Tus apps" > app web > "Configuración del SDK".
-// Este objeto está pensado para ser público (así funciona el SDK de Firebase en el navegador):
-// la seguridad real la dan las reglas de firestore.rules, no el secreto de estos valores.
-window.CONFIG = {
-  firebaseConfig: {
-    apiKey: "TU-API-KEY",
-    authDomain: "tu-proyecto.firebaseapp.com",
-    projectId: "tu-proyecto",
-    storageBucket: "tu-proyecto.appspot.com",
-    messagingSenderId: "000000000000",
-    appId: "1:000000000000:web:xxxxxxxxxxxxxxxxxx"
-  }
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyDtqhO3Q3OsaUr6vGVWZ_Orr3jqW7TGPGI",
+  authDomain: "cobro-isj.firebaseapp.com",
+  projectId: "cobro-isj",
+  storageBucket: "cobro-isj.firebasestorage.app",
+  messagingSenderId: "291983311719",
+  appId: "1:291983311719:web:0a73e7a490f4902fc925c2",
+  measurementId: "G-8YS50BLQM8"
 };
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
