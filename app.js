@@ -7,7 +7,7 @@ const db = firebase.firestore();
 let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
 let SESSION = null; // { id, email, rol, nombre, access_token }
 let TAB = 'dashboard';
-let UI = { alertaMsg:null, alertaLogin:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', busquedaAlumnos:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null, cursosAbiertos:{}, aniosAbiertos:{}, dashboardFiltro:null };
+let UI = { alertaMsg:null, alertaLogin:null, alertaLoginOk:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', busquedaAlumnos:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null, cursosAbiertos:{}, aniosAbiertos:{}, dashboardFiltro:null };
 
 /* ======================= UTILIDADES ======================= */
 function fmtMoney(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0}); }
@@ -145,6 +145,25 @@ async function login(email, clave){
     await establecerSesion(cred.user);
     return !!SESSION;
   }catch(e){ return false; }
+}
+async function recuperarContrasena(){
+  const email = (document.getElementById('lu').value||'').trim();
+  UI.alertaLoginOk = null;
+  if(!email){
+    UI.alertaLogin = 'Escribí tu email en el campo de arriba y volvé a tocar "¿Olvidaste tu contraseña?".';
+    render(); return;
+  }
+  try{
+    await auth.sendPasswordResetEmail(email);
+    UI.alertaLogin = null;
+    UI.alertaLoginOk = `Te enviamos un email a ${email} con un link para crear una nueva contraseña. Revisá también la carpeta de spam.`;
+  }catch(e){
+    UI.alertaLoginOk = null;
+    UI.alertaLogin = e.code==='auth/user-not-found'
+      ? 'No hay ninguna cuenta registrada con ese email.'
+      : 'No pudimos enviar el email: ' + (e.message||e);
+  }
+  render();
 }
 async function logout(){
   await auth.signOut();
@@ -435,12 +454,16 @@ function vistaLogin(){
         <h2 class="font-display font-bold text-xl mb-1">Iniciar sesión</h2>
         <p class="text-sm text-gray-500 mb-6">Ingresá con tu cuenta para continuar.</p>
         ${UI.alertaLogin ? `<div class="badge-danger text-xs rounded-lg p-3 mb-4 anim-slide-down">${UI.alertaLogin}</div>` : ''}
+        ${UI.alertaLoginOk ? `<div class="badge-ok text-xs rounded-lg p-3 mb-4 anim-slide-down">${UI.alertaLoginOk}</div>` : ''}
         <form id="loginForm" onsubmit="manejarLogin(event)">
           <label class="lbl">Email</label>
           <input id="lu" type="text" class="mb-3" placeholder="tu@email.com" autofocus>
           <label class="lbl">Contraseña</label>
           <input id="lc" type="password" class="mb-1" placeholder="••••••••">
-          <button type="submit" id="loginBtn" class="btn-primary w-full mt-4 py-2.5 rounded-lg font-semibold text-sm">Ingresar</button>
+          <div class="text-right mb-1">
+            <button type="button" onclick="recuperarContrasena()" class="text-xs font-medium" style="color:var(--accent)">¿Olvidaste tu contraseña?</button>
+          </div>
+          <button type="submit" id="loginBtn" class="btn-primary w-full mt-3 py-2.5 rounded-lg font-semibold text-sm">Ingresar</button>
         </form>
         <p class="text-[11px] text-gray-400 mt-8 md:hidden text-center">Desarrollado por Prof. Maidan Marcos Exequiel</p>
       </div>
@@ -455,6 +478,7 @@ async function manejarLogin(e){
   const btn = document.getElementById('loginBtn');
   btn.disabled = true; btn.textContent = 'Ingresando...';
   UI.alertaLogin = null;
+  UI.alertaLoginOk = null;
   const email = document.getElementById('lu').value.trim();
   const clave = document.getElementById('lc').value;
   const ok = await login(email, clave);
@@ -1054,11 +1078,15 @@ function vistaConfig(){
       <div class="grid sm:grid-cols-4 gap-2">
         <input type="text" id="nuUsuario" placeholder="email">
         <input type="text" id="nuNombre" placeholder="nombre completo">
-        <input type="password" id="nuClave" placeholder="contraseña">
+        <input type="password" id="nuClave" placeholder="contraseña temporal">
         <select id="nuRol"><option value="cobrador">Cobrador/a</option><option value="super">Superusuario</option></select>
       </div>
+      <label class="flex items-center gap-2 text-xs text-gray-500 select-none mt-3">
+        <input type="checkbox" id="nuEnviarReset" checked>
+        Enviarle un email para que configure su propia contraseña (recomendado)
+      </label>
       <button onclick="agregarUsuario()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold mt-3">Agregar usuario</button>
-      <p class="text-xs text-gray-400 mt-2">Eliminar un usuario acá quita su acceso a la app. Para borrarlo por completo de Authentication, hacelo desde la consola de Firebase.</p>
+      <p class="text-xs text-gray-400 mt-2">Si tildás la casilla, la contraseña temporal que cargues arriba no hace falta compartirla: el usuario va a poder elegir la suya desde el email que le llega. Eliminar un usuario acá quita su acceso a la app; para borrarlo por completo de Authentication, hacelo desde la consola de Firebase.</p>
     </div>
   `;
 }
@@ -1089,6 +1117,7 @@ async function agregarUsuario(){
   const nombre=document.getElementById('nuNombre').value.trim();
   const clave=document.getElementById('nuClave').value;
   const rol=document.getElementById('nuRol').value;
+  const enviarReset=document.getElementById('nuEnviarReset').checked;
   if(!email||!clave) return;
   try{
     const resp = await fetch('/api/crear-usuario', {
@@ -1099,7 +1128,16 @@ async function agregarUsuario(){
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error||'No se pudo crear el usuario');
     await cargarPerfiles();
-    UI.alertaMsg = 'Usuario creado correctamente.';
+    if(enviarReset){
+      try{
+        await auth.sendPasswordResetEmail(email);
+        UI.alertaMsg = `Usuario creado. Le enviamos un email a ${email} para que configure su propia contraseña.`;
+      }catch(e2){
+        UI.alertaMsg = 'Usuario creado, pero no se pudo enviar el email de configuración: '+e2.message;
+      }
+    }else{
+      UI.alertaMsg = 'Usuario creado correctamente.';
+    }
   }catch(e){
     UI.alertaMsg = 'Error: '+e.message;
   }
