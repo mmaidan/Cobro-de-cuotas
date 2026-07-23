@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function estaAutenticado() {
+      return request.auth != null;
+    }
+
+    function esSuper() {
+      return estaAutenticado() &&
+        exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'super';
+    }
+
+    // Perfiles de usuario (rol: 'super' o 'cobrador')
+    match /usuarios/{uid} {
+      allow read: if estaAutenticado() && (request.auth.uid == uid || esSuper());
+      allow write: if esSuper();
+    }
+
+    // Alumnos: cualquier usuario logueado los puede ver, solo el super los edita/importa
+    match /alumnos/{alumnoId} {
+      allow read: if estaAutenticado();
+      allow create, update, delete: if esSuper();
+    }
+
+    // Configuración general (cuota, día de vencimiento, regla de mora)
+    match /configuracion/{docId} {
+      allow read: if estaAutenticado();
+      allow write: if esSuper();
+    }
+
+    // Pagos: cualquier usuario logueado registra cobros, solo el super los anula
+    match /pagos/{pagoId} {
+      allow read: if estaAutenticado();
+      allow create, update: if estaAutenticado();
+      allow delete: if esSuper();
+    }
+  }
+}

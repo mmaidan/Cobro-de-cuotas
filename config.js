@@ -1,9 +1,15 @@
-// Reemplazá estos dos valores por los de TU proyecto de Supabase.
-// Los encontrás en: Supabase > Settings > API > Project URL / anon public key.
-// La "anon key" está pensada para ser pública: la seguridad real la dan
-// las políticas de RLS definidas en supabase/migrations/0001_init.sql,
-// no el secreto de esta clave. NUNCA pongas acá la "service_role key".
+// Reemplazá estos valores por los de TU proyecto de Firebase.
+// Los encontrás en: Firebase Console > Configuración del proyecto (ícono de tuerca)
+// > General > "Tus apps" > app web > "Configuración del SDK".
+// Este objeto está pensado para ser público (así funciona el SDK de Firebase en el navegador):
+// la seguridad real la dan las reglas de firestore.rules, no el secreto de estos valores.
 window.CONFIG = {
-  SUPABASE_URL: 'https://TU-PROYECTO.supabase.co',
-  SUPABASE_ANON_KEY: 'TU-ANON-KEY-PUBLICA'
+  firebaseConfig: {
+    apiKey: "TU-API-KEY",
+    authDomain: "tu-proyecto.firebaseapp.com",
+    projectId: "tu-proyecto",
+    storageBucket: "tu-proyecto.appspot.com",
+    messagingSenderId: "000000000000",
+    appId: "1:000000000000:web:xxxxxxxxxxxxxxxxxx"
+  }
 };

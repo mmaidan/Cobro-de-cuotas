@@ -1,5 +1,7 @@
-/* ======================= CLIENTE SUPABASE ======================= */
-const supabase = window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_ANON_KEY);
+/* ======================= FIREBASE ======================= */
+firebase.initializeApp(window.CONFIG.firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
 
 /* ======================= ESTADO EN MEMORIA ======================= */
 let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
@@ -8,7 +10,6 @@ let TAB = 'dashboard';
 let UI = { alertaMsg:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', _modalPago:null };
 
 /* ======================= UTILIDADES ======================= */
-function uid(){ return Math.random().toString(36).slice(2,10); }
 function fmtMoney(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0}); }
 function fmtFecha(iso){ if(!iso) return '-'; const [y,m,d]=iso.split('-'); return `${d}/${m}/${y}`; }
 function nuevaFechaISO(){ return new Date().toISOString().slice(0,10); }
@@ -39,29 +40,22 @@ function diasEntre(fechaA, fechaB){
 }
 
 /* ======================= MAPEO DB <-> APP ======================= */
+// Firestore ya guarda los campos en camelCase, así que el mapeo es casi directo.
 function mapConfigDesdeDB(c){
   if(!c) return { montoCuota:15000, diaVencimiento:10, periodoInicio:periodoActual(), mora:{porcentajePor10Dias:10, topeBloques:3, porcentajeMensualExtra:5} };
   return {
-    montoCuota: Number(c.monto_cuota),
-    diaVencimiento: Number(c.dia_vencimiento),
-    periodoInicio: c.periodo_inicio,
-    mora: { porcentajePor10Dias: Number(c.mora_pct_10dias), topeBloques: Number(c.mora_tope_bloques), porcentajeMensualExtra: Number(c.mora_pct_mensual_extra) }
+    montoCuota: Number(c.montoCuota),
+    diaVencimiento: Number(c.diaVencimiento),
+    periodoInicio: c.periodoInicio,
+    mora: {
+      porcentajePor10Dias: Number(c.mora?.porcentajePor10Dias ?? 10),
+      topeBloques: Number(c.mora?.topeBloques ?? 3),
+      porcentajeMensualExtra: Number(c.mora?.porcentajeMensualExtra ?? 5)
+    }
   };
 }
-function mapAlumnoDesdeDB(a){
-  return {
-    id: a.id, apellidos: a.apellidos, nombres: a.nombres, dni: a.dni, curso: a.curso, turno: a.turno,
-    telefono: a.telefono, email: a.email, tutorApellido: a.tutor_apellido, tutorNombre: a.tutor_nombre,
-    telefonoTutor: a.telefono_tutor, emailTutor: a.email_tutor, activo: a.activo
-  };
-}
-function mapPagoDesdeDB(p){
-  return {
-    id: p.id, alumnoId: p.alumno_id, periodo: p.periodo, montoBase: Number(p.monto_base),
-    recargoPct: Number(p.recargo_pct), montoTotal: Number(p.monto_total), montoPagado: Number(p.monto_pagado),
-    metodo: p.metodo, fecha: p.fecha, diasAtrasoAlPagar: p.dias_atraso_al_pagar, registradoPor: p.registrado_por
-  };
-}
+function mapAlumnoDesdeDB(id, a){ return { id, ...a }; }
+function mapPagoDesdeDB(id, p){ return { id, ...p }; }
 
 /* ======================= LÓGICA DE MORA (igual que antes) ======================= */
 function calcularRecargoPorcentaje(diasAtraso){
@@ -102,45 +96,50 @@ function resumenAlumno(alumnoId){
 }
 
 /* ======================= AUTENTICACIÓN ======================= */
-async function initApp(){
-  const { data: { session } } = await supabase.auth.getSession();
-  if(session){ await establecerSesion(session); }
-  UI.cargando = false;
-  render();
+function initApp(){
+  auth.onAuthStateChanged(async (user)=>{
+    if(user){ await establecerSesion(user); }
+    else{ SESSION = null; }
+    UI.cargando = false;
+    render();
+  });
 }
-async function establecerSesion(session){
-  const { data: perfil, error } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-  if(error || !perfil){
-    await supabase.auth.signOut();
+async function establecerSesion(user){
+  const perfilSnap = await db.collection('usuarios').doc(user.uid).get();
+  if(!perfilSnap.exists){
+    await auth.signOut();
     SESSION = null;
     return;
   }
-  SESSION = { id: session.user.id, email: session.user.email, rol: perfil.rol, nombre: perfil.nombre, access_token: session.access_token };
+  const perfil = perfilSnap.data();
+  const token = await user.getIdToken();
+  SESSION = { id: user.uid, email: user.email, rol: perfil.rol, nombre: perfil.nombre, access_token: token };
   await cargarDatos();
 }
 async function cargarDatos(){
-  const [{data: cfg}, {data: alumnos}, {data: pagos}] = await Promise.all([
-    supabase.from('configuracion').select('*').eq('id',1).single(),
-    supabase.from('alumnos').select('*').order('apellidos'),
-    supabase.from('pagos').select('*')
+  const [cfgSnap, alumnosSnap, pagosSnap] = await Promise.all([
+    db.collection('configuracion').doc('general').get(),
+    db.collection('alumnos').orderBy('apellidos').get(),
+    db.collection('pagos').get()
   ]);
-  STATE.config = mapConfigDesdeDB(cfg);
-  STATE.alumnos = (alumnos||[]).map(mapAlumnoDesdeDB);
-  STATE.pagos = (pagos||[]).map(mapPagoDesdeDB);
+  STATE.config = mapConfigDesdeDB(cfgSnap.exists ? cfgSnap.data() : null);
+  STATE.alumnos = alumnosSnap.docs.map(d=>mapAlumnoDesdeDB(d.id, d.data()));
+  STATE.pagos = pagosSnap.docs.map(d=>mapPagoDesdeDB(d.id, d.data()));
   if(SESSION.rol==='super'){ await cargarPerfiles(); }
 }
 async function cargarPerfiles(){
-  const { data } = await supabase.from('profiles').select('*').order('nombre');
-  STATE.perfiles = data||[];
+  const snap = await db.collection('usuarios').orderBy('nombre').get();
+  STATE.perfiles = snap.docs.map(d=>({id:d.id, ...d.data()}));
 }
 async function login(email, clave){
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password: clave });
-  if(error || !data.session) return false;
-  await establecerSesion(data.session);
-  return !!SESSION;
+  try{
+    const cred = await auth.signInWithEmailAndPassword(email, clave);
+    await establecerSesion(cred.user);
+    return !!SESSION;
+  }catch(e){ return false; }
 }
 async function logout(){
-  await supabase.auth.signOut();
+  await auth.signOut();
   SESSION = null;
   STATE = { config:null, alumnos:[], pagos:[], perfiles:[] };
   render();
@@ -196,6 +195,22 @@ function procesarCSV(file){
   if(UI.importEncoding==='latin1'){ reader.readAsText(file, 'ISO-8859-1'); }
   else{ reader.readAsText(file, 'UTF-8'); }
 }
+// Firestore permite hasta 500 operaciones por batch; lo troceamos por las dudas.
+async function insertarEnLotes(coleccion, items){
+  const creados = [];
+  for(let i=0;i<items.length;i+=400){
+    const chunk = items.slice(i, i+400);
+    const batch = db.batch();
+    const refs = chunk.map(data=>{
+      const ref = db.collection(coleccion).doc();
+      batch.set(ref, data);
+      return { ref, data };
+    });
+    await batch.commit();
+    refs.forEach(r=>creados.push({ id: r.ref.id, ...r.data }));
+  }
+  return creados;
+}
 async function confirmarImportacion(){
   const dnisExistentes = new Set(STATE.alumnos.map(a=>a.dni).filter(Boolean));
   const candidatos = UI.importPreview.filter(f=> !f.dni || !dnisExistentes.has(f.dni));
@@ -203,42 +218,51 @@ async function confirmarImportacion(){
   const nuevos = candidatos.map(f=>({
     apellidos: f.apellidos, nombres: f.nombres, dni: f.dni || null, curso: f.curso, turno: f.turno,
     telefono: f.telefono || null, email: f.email || null,
-    tutor_apellido: f.tutorApellido || null, tutor_nombre: f.tutorNombre || null,
-    telefono_tutor: f.telefonoTutor || null, email_tutor: f.emailTutor || null,
+    tutorApellido: f.tutorApellido || null, tutorNombre: f.tutorNombre || null,
+    telefonoTutor: f.telefonoTutor || null, emailTutor: f.emailTutor || null,
     activo: !f.estadoOriginal || f.estadoOriginal.toLowerCase().includes('activ')
   }));
-  const { data, error } = await supabase.from('alumnos').insert(nuevos).select();
-  if(error){ UI.alertaMsg = 'Error al importar: '+error.message; render(); return; }
-  STATE.alumnos = STATE.alumnos.concat((data||[]).map(mapAlumnoDesdeDB))
-    .sort((a,b)=> (a.apellidos||'').localeCompare(b.apellidos||''));
-  UI.importPreview = null;
-  UI.alertaMsg = `Se importaron ${data.length} alumnos (${omitidos} omitidos por DNI duplicado).`;
+  try{
+    const creados = await insertarEnLotes('alumnos', nuevos);
+    STATE.alumnos = STATE.alumnos.concat(creados).sort((a,b)=> (a.apellidos||'').localeCompare(b.apellidos||''));
+    UI.importPreview = null;
+    UI.alertaMsg = `Se importaron ${creados.length} alumnos (${omitidos} omitidos por DNI duplicado).`;
+  }catch(e){
+    UI.alertaMsg = 'Error al importar: '+e.message;
+  }
   render();
 }
 
 /* ======================= PAGOS ======================= */
+// docId determinístico (alumno+período) para que registrar dos veces el mismo mes actualice, no duplique.
 async function registrarPago({alumnoId, periodo, metodo, montoPagado}){
   const cuota = cuotasDeAlumno(alumnoId).find(c=>c.periodo===periodo);
+  const docId = alumnoId+'_'+periodo;
   const registro = {
-    alumno_id: alumnoId, periodo,
-    monto_base: STATE.config.montoCuota,
-    recargo_pct: cuota.pct,
-    monto_total: cuota.montoConMora,
-    monto_pagado: montoPagado || cuota.montoConMora,
+    alumnoId, periodo,
+    montoBase: STATE.config.montoCuota,
+    recargoPct: cuota.pct,
+    montoTotal: cuota.montoConMora,
+    montoPagado: montoPagado || cuota.montoConMora,
     metodo, fecha: nuevaFechaISO(),
-    dias_atraso_al_pagar: cuota.diasAtraso,
-    registrado_por: SESSION.id
+    diasAtrasoAlPagar: cuota.diasAtraso,
+    registradoPor: SESSION.id
   };
-  const { data, error } = await supabase.from('pagos').upsert(registro, { onConflict: 'alumno_id,periodo' }).select().single();
   UI._modalPago = null;
-  if(error){ UI.alertaMsg = 'Error al registrar el cobro: '+error.message; render(); return; }
-  STATE.pagos.push(mapPagoDesdeDB(data));
-  UI.alertaMsg = 'Cobro registrado correctamente.';
+  try{
+    await db.collection('pagos').doc(docId).set(registro);
+    STATE.pagos = STATE.pagos.filter(p=>p.id!==docId).concat([{ id: docId, ...registro }]);
+    UI.alertaMsg = 'Cobro registrado correctamente.';
+  }catch(e){
+    UI.alertaMsg = 'Error al registrar el cobro: '+e.message;
+  }
   render();
 }
 async function anularPago(pagoId){
-  const { error } = await supabase.from('pagos').delete().eq('id', pagoId);
-  if(!error) STATE.pagos = STATE.pagos.filter(p=>p.id!==pagoId);
+  try{
+    await db.collection('pagos').doc(pagoId).delete();
+    STATE.pagos = STATE.pagos.filter(p=>p.id!==pagoId);
+  }catch(e){ UI.alertaMsg = 'Error: '+e.message; }
   render();
 }
 
@@ -278,7 +302,7 @@ function vistaLogin(){
       const btn = document.getElementById('loginBtn');
       btn.disabled = true; btn.textContent = 'Ingresando...';
       const ok = await login(document.getElementById('lu').value.trim(), document.getElementById('lc').value);
-      if(ok){ render(); } else { document.getElementById('lerr').classList.remove('hidden'); btn.disabled=false; btn.textContent='Ingresar'; }
+      if(!ok){ document.getElementById('lerr').classList.remove('hidden'); btn.disabled=false; btn.textContent='Ingresar'; }
     });
   </script>`;
 }
@@ -550,7 +574,7 @@ function vistaConfig(){
         <select id="nuRol"><option value="cobrador">Cobrador/a</option><option value="super">Superusuario</option></select>
       </div>
       <button onclick="agregarUsuario()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold mt-3">Agregar usuario</button>
-      <p class="text-xs text-gray-400 mt-2">Eliminar un usuario acá quita su acceso a la app. Para borrarlo por completo de Authentication, hacelo desde el panel de Supabase.</p>
+      <p class="text-xs text-gray-400 mt-2">Eliminar un usuario acá quita su acceso a la app. Para borrarlo por completo de Authentication, hacelo desde la consola de Firebase.</p>
     </div>
   `;
 }
@@ -558,23 +582,23 @@ async function guardarCuota(){
   const montoCuota = Number(document.getElementById('cfgMonto').value)||0;
   const diaVencimiento = Number(document.getElementById('cfgDia').value)||10;
   const periodoInicio = document.getElementById('cfgPeriodo').value || STATE.config.periodoInicio;
-  const { error } = await supabase.from('configuracion').update({
-    monto_cuota: montoCuota, dia_vencimiento: diaVencimiento, periodo_inicio: periodoInicio
-  }).eq('id',1);
-  if(error){ UI.alertaMsg='Error: '+error.message; render(); return; }
-  STATE.config.montoCuota = montoCuota; STATE.config.diaVencimiento = diaVencimiento; STATE.config.periodoInicio = periodoInicio;
-  UI.alertaMsg='Configuración de cuota guardada.'; render();
+  try{
+    await db.collection('configuracion').doc('general').set({ montoCuota, diaVencimiento, periodoInicio }, {merge:true});
+    STATE.config.montoCuota = montoCuota; STATE.config.diaVencimiento = diaVencimiento; STATE.config.periodoInicio = periodoInicio;
+    UI.alertaMsg='Configuración de cuota guardada.';
+  }catch(e){ UI.alertaMsg='Error: '+e.message; }
+  render();
 }
 async function guardarMora(){
-  const p10 = Number(document.getElementById('cfgPct10').value)||0;
-  const tope = Number(document.getElementById('cfgTope').value)||3;
-  const pMes = Number(document.getElementById('cfgPctMes').value)||0;
-  const { error } = await supabase.from('configuracion').update({
-    mora_pct_10dias: p10, mora_tope_bloques: tope, mora_pct_mensual_extra: pMes
-  }).eq('id',1);
-  if(error){ UI.alertaMsg='Error: '+error.message; render(); return; }
-  STATE.config.mora = { porcentajePor10Dias:p10, topeBloques:tope, porcentajeMensualExtra:pMes };
-  UI.alertaMsg='Regla de mora actualizada.'; render();
+  const porcentajePor10Dias = Number(document.getElementById('cfgPct10').value)||0;
+  const topeBloques = Number(document.getElementById('cfgTope').value)||3;
+  const porcentajeMensualExtra = Number(document.getElementById('cfgPctMes').value)||0;
+  try{
+    await db.collection('configuracion').doc('general').set({ mora: { porcentajePor10Dias, topeBloques, porcentajeMensualExtra } }, {merge:true});
+    STATE.config.mora = { porcentajePor10Dias, topeBloques, porcentajeMensualExtra };
+    UI.alertaMsg='Regla de mora actualizada.';
+  }catch(e){ UI.alertaMsg='Error: '+e.message; }
+  render();
 }
 async function agregarUsuario(){
   const email=document.getElementById('nuUsuario').value.trim();
@@ -599,8 +623,10 @@ async function agregarUsuario(){
 }
 async function eliminarUsuario(id){
   if(id === SESSION.id){ UI.alertaMsg='No podés eliminar tu propio usuario.'; render(); return; }
-  const { error } = await supabase.from('profiles').delete().eq('id', id);
-  if(!error) STATE.perfiles = STATE.perfiles.filter(p=>p.id!==id);
+  try{
+    await db.collection('usuarios').doc(id).delete();
+    STATE.perfiles = STATE.perfiles.filter(p=>p.id!==id);
+  }catch(e){ UI.alertaMsg = 'Error: '+e.message; }
   render();
 }
 
@@ -628,4 +654,5 @@ function modalImportPreview(){
 }
 
 /* ======================= ARRANQUE ======================= */
+render(); // muestra "Cargando..." mientras Firebase resuelve la sesión
 initApp();
