@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestión de Cuotas — Escuela</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --ink:#111827; --muted:#6b7280;
+    --sidebar:#0f172a; --sidebar-ink:#cbd5e1;
+    --accent:#0d9488; --accent-dark:#0f766e;
+    --warn:#d97706; --danger:#e11d48; --ok:#16a34a; --border:#e5e7eb;
+  }
+  *{font-family:'Inter',sans-serif;}
+  h1,h2,h3,.font-display{font-family:'Sora',sans-serif;}
+  body{background:var(--bg); color:var(--ink);}
+  .sidebar{background:var(--sidebar); color:var(--sidebar-ink);}
+  .nav-item{transition:all .15s ease;}
+  .nav-item:hover{background:rgba(255,255,255,.06); color:#fff;}
+  .nav-item.active{background:var(--accent); color:#fff;}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px;}
+  .btn-primary{background:var(--accent); color:#fff;}
+  .btn-primary:hover{background:var(--accent-dark);}
+  .badge-ok{background:#dcfce7; color:var(--ok);}
+  .badge-warn{background:#fef3c7; color:var(--warn);}
+  .badge-danger{background:#ffe4e6; color:var(--danger);}
+  .badge-muted{background:#f1f5f9; color:var(--muted);}
+  table.tbl th{font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); font-weight:600;}
+  table.tbl td, table.tbl th{padding:10px 14px; border-bottom:1px solid var(--border);}
+  table.tbl tr:hover td{background:#fafbfc;}
+  .modal-bg{background:rgba(15,23,42,.55);}
+  ::-webkit-scrollbar{width:8px; height:8px;}
+  ::-webkit-scrollbar-thumb{background:#cbd5e1; border-radius:8px;}
+  input[type=text], input[type=number], input[type=date], input[type=month], input[type=password], select{
+    border:1px solid var(--border); border-radius:8px; padding:8px 10px; width:100%; font-size:14px;
+  }
+  input:focus, select:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:transparent;}
+  label.lbl{font-size:12px; font-weight:600; color:var(--muted); display:block; margin-bottom:4px;}
+</style>
+</head>
+<body class="h-screen w-screen overflow-hidden">
+<div id="app" class="h-full w-full"></div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

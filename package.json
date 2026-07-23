@@ -1,0 +1,9 @@
+{
+  "name": "gestion-cuotas-escuela",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Control y cobro de cuotas escolares (efectivo/transferencia) con roles de superusuario y cobrador.",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
