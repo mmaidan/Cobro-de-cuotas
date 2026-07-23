@@ -1016,6 +1016,17 @@ function vistaEstadisticas(){
 
 function abrirModalPago(alumnoId, periodo){ UI._modalPago = { alumnoId, periodo, metodo:'efectivo' }; render(); }
 function cerrarModalPago(){ UI._modalPago=null; render(); }
+// A propósito NO llama a render(): si volviera a dibujar el modal entero, la animación
+// de entrada se repetiría en cada clic y se vería como un destello molesto.
+function seleccionarMetodoPago(metodo){
+  UI._modalPago.metodo = metodo;
+  const btnEf = document.getElementById('btnMetodoEfectivo');
+  const btnTr = document.getElementById('btnMetodoTransferencia');
+  const activar = (btn)=>{ btn.classList.add('btn-primary'); btn.style.borderColor = ''; };
+  const desactivar = (btn)=>{ btn.classList.remove('btn-primary'); btn.style.borderColor = 'var(--border)'; };
+  if(metodo==='efectivo'){ activar(btnEf); desactivar(btnTr); }
+  else{ activar(btnTr); desactivar(btnEf); }
+}
 function modalPago(){
   const {alumnoId, periodo, metodo} = UI._modalPago;
   const a = STATE.alumnos.find(x=>x.id===alumnoId);
@@ -1032,8 +1043,8 @@ function modalPago(){
       </div>
       <label class="lbl">Método de pago</label>
       <div class="grid grid-cols-2 gap-2 mb-4">
-        <button onclick="UI._modalPago.metodo='efectivo'; render();" class="py-2 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 ${metodo==='efectivo'?'btn-primary':''}" style="${metodo!=='efectivo'?'border-color:var(--border)':''}">${icon('banknote','w-4 h-4')} Efectivo</button>
-        <button onclick="UI._modalPago.metodo='transferencia'; render();" class="py-2 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 ${metodo==='transferencia'?'btn-primary':''}" style="${metodo!=='transferencia'?'border-color:var(--border)':''}">${icon('landmark','w-4 h-4')} Transferencia</button>
+        <button id="btnMetodoEfectivo" onclick="seleccionarMetodoPago('efectivo')" class="py-2 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 ${metodo==='efectivo'?'btn-primary':''}" style="${metodo!=='efectivo'?'border-color:var(--border)':''}">${icon('banknote','w-4 h-4')} Efectivo</button>
+        <button id="btnMetodoTransferencia" onclick="seleccionarMetodoPago('transferencia')" class="py-2 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 ${metodo==='transferencia'?'btn-primary':''}" style="${metodo!=='transferencia'?'border-color:var(--border)':''}">${icon('landmark','w-4 h-4')} Transferencia</button>
       </div>
       <div class="flex gap-2 mt-5">
         <button onclick="cerrarModalPago()" class="flex-1 py-2 rounded-lg text-sm font-semibold border" style="border-color:var(--border)">Cancelar</button>
