@@ -8,7 +8,7 @@
 <!-- PWA: permite "Agregar a pantalla de inicio" en Android/iOS y que la app
      abra a pantalla completa, como una app nativa. -->
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1e293f">
+<meta name="theme-color" content="#2a1f1c">
 <meta name="background-color" content="#f8f4ec">
 <link rel="icon" href="icons/favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -18,6 +18,8 @@
 <meta name="apple-mobile-web-app-title" content="Cuotas ISJ">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <!-- SDK "compat" de Firebase: expone el objeto global `firebase`, así el resto del código
      puede seguir siendo JS plano sin necesidad de módulos ES ni build step. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -32,9 +34,9 @@
      verde de las hojas -> al día · rojo del borde -> mora vencida / alertas */
   :root{
     --bg:#f8f4ec; --panel:#ffffff; --ink:#332b22; --muted:#8a8073;
-    --sidebar:#1e293f; --sidebar-ink:#c7d0e3;
-    --accent:#5b7da6; --accent-dark:#46658a;
-    --warn:#c98f35; --danger:#bb5847; --ok:#6b9a63; --border:#e8e0d0;
+    --sidebar:#2a1f1c; --sidebar-ink:#e3d3ca;
+    --accent:#a1483a; --accent-dark:#833a2f;
+    --warn:#c98f35; --danger:#c1392b; --ok:#6b9a63; --border:#e8e0d0;
   }
   *{font-family:'Inter',sans-serif;}
   h1,h2,h3,.font-display{font-family:'Sora',sans-serif;}

@@ -7,7 +7,7 @@ const db = firebase.firestore();
 let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
 let SESSION = null; // { id, email, rol, nombre, access_token }
 let TAB = 'dashboard';
-let UI = { alertaMsg:null, alertaLogin:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', _modalPago:null, sidebarAbierto:false };
+let UI = { alertaMsg:null, alertaLogin:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null };
 
 /* ======================= UTILIDADES ======================= */
 function fmtMoney(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0}); }
@@ -171,10 +171,29 @@ function buscarCampo(row, claves){
   }
   return '';
 }
-function procesarCSV(file){
+// Antes esto dependía de que el usuario eligiera bien la codificación en un selector.
+// Si elegía "UTF-8" para un CSV que en realidad era Latin-1 (el caso típico al
+// exportar desde sistemas de gestión escolar/Excel), los caracteres con acentos
+// y ñ se perdían de forma IRREVERSIBLE (quedaban como el símbolo "�"), porque
+// el navegador ya descarta esos bytes al decodificar. Ahora se detecta solo:
+// probamos UTF-8 en modo estricto; si el archivo no es UTF-8 válido, usamos Latin-1.
+function leerArchivoConDeteccionAutomatica(file, callback){
   const reader = new FileReader();
   reader.onload = function(e){
-    Papa.parse(e.target.result, {
+    const bytes = new Uint8Array(e.target.result);
+    let texto;
+    try{
+      texto = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    }catch(err){
+      texto = new TextDecoder('iso-8859-1').decode(bytes);
+    }
+    callback(texto);
+  };
+  reader.readAsArrayBuffer(file);
+}
+function procesarCSV(file){
+  leerArchivoConDeteccionAutomatica(file, function(texto){
+    Papa.parse(texto, {
       header: true, skipEmptyLines: true,
       complete: function(results){
         const filas = results.data.map(row=>{
@@ -199,9 +218,7 @@ function procesarCSV(file){
         render();
       }
     });
-  };
-  if(UI.importEncoding==='latin1'){ reader.readAsText(file, 'ISO-8859-1'); }
-  else{ reader.readAsText(file, 'UTF-8'); }
+  });
 }
 // Firestore permite hasta 500 operaciones por batch; lo troceamos por las dudas.
 async function insertarEnLotes(coleccion, items){
@@ -218,6 +235,32 @@ async function insertarEnLotes(coleccion, items){
     refs.forEach(r=>creados.push({ id: r.ref.id, ...r.data }));
   }
   return creados;
+}
+async function confirmarBorrarAlumnos(){
+  const cantidad = STATE.alumnos.length;
+  const ok = confirm(`Esto borra los ${cantidad} alumnos cargados y todos los pagos registrados. No se puede deshacer. ¿Continuar?`);
+  if(!ok) return;
+  UI.alertaMsg = 'Borrando...'; render();
+  try{
+    // Borramos alumnos y sus pagos asociados, en lotes de 400 (límite de Firestore).
+    const idsAlumnos = STATE.alumnos.map(a=>a.id);
+    const idsPagos = STATE.pagos.map(p=>p.id);
+    const todos = [
+      ...idsAlumnos.map(id=>({coleccion:'alumnos', id})),
+      ...idsPagos.map(id=>({coleccion:'pagos', id}))
+    ];
+    for(let i=0;i<todos.length;i+=400){
+      const batch = db.batch();
+      todos.slice(i,i+400).forEach(({coleccion,id})=> batch.delete(db.collection(coleccion).doc(id)));
+      await batch.commit();
+    }
+    STATE.alumnos = [];
+    STATE.pagos = [];
+    UI.alertaMsg = `Se borraron ${cantidad} alumnos. Ya podés reimportar el CSV.`;
+  }catch(e){
+    UI.alertaMsg = 'Error al borrar: '+e.message;
+  }
+  render();
 }
 async function confirmarImportacion(){
   const dnisExistentes = new Set(STATE.alumnos.map(a=>a.dni).filter(Boolean));
@@ -260,7 +303,7 @@ async function registrarPago({alumnoId, periodo, metodo, montoPagado}){
   try{
     await db.collection('pagos').doc(docId).set(registro);
     STATE.pagos = STATE.pagos.filter(p=>p.id!==docId).concat([{ id: docId, ...registro }]);
-    UI.alertaMsg = 'Cobro registrado correctamente.';
+    UI.alertaMsg = `Cobro registrado correctamente. <button onclick="generarComprobantePDF('${docId}')" class="underline font-semibold ml-1">Imprimir comprobante</button>`;
   }catch(e){
     UI.alertaMsg = 'Error al registrar el cobro: '+e.message;
   }
@@ -272,6 +315,73 @@ async function anularPago(pagoId){
     STATE.pagos = STATE.pagos.filter(p=>p.id!==pagoId);
   }catch(e){ UI.alertaMsg = 'Error: '+e.message; }
   render();
+}
+
+/* ======================= PDF: comprobante y deudores ======================= */
+function encabezadoPDF(doc, titulo){
+  try{ if(window.LOGO_DATA_URL) doc.addImage(window.LOGO_DATA_URL, 'PNG', 14, 10, 16, 18); }catch(e){}
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('Instituto San José', 34, 18);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(120);
+  doc.text('Quines, San Luis', 34, 23);
+  doc.setTextColor(30); doc.setFont('helvetica','bold'); doc.setFontSize(12);
+  doc.text(titulo, 14, 36);
+  doc.setDrawColor(225,220,208); doc.line(14, 40, 196, 40);
+}
+function generarComprobantePDF(pagoId){
+  const p = STATE.pagos.find(x=>x.id===pagoId);
+  if(!p){ UI.alertaMsg = 'No se encontró el pago.'; render(); return; }
+  const a = STATE.alumnos.find(x=>x.id===p.alumnoId);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  encabezadoPDF(doc, 'Comprobante de pago');
+  doc.setFontSize(10); doc.setFont('helvetica','normal'); doc.setTextColor(40);
+  let y = 50;
+  const fila = (label, valor)=>{ doc.setFont('helvetica','bold'); doc.text(label, 14, y); doc.setFont('helvetica','normal'); doc.text(String(valor), 60, y); y += 8; };
+  fila('Recibo N°:', p.id.slice(0,8).toUpperCase());
+  fila('Fecha de pago:', fmtFecha(p.fecha));
+  fila('Alumno:', a ? `${a.apellidos}, ${a.nombres}` : '—');
+  fila('Curso:', a ? (a.curso||'-') : '-');
+  fila('DNI:', a ? (a.dni||'-') : '-');
+  fila('Concepto:', 'Cuota ' + mesNombre(p.periodo));
+  fila('Método de pago:', p.metodo==='efectivo' ? 'Efectivo' : 'Transferencia');
+  if(p.recargoPct>0) fila('Recargo por mora:', `${p.recargoPct}%`);
+  y += 2;
+  doc.setDrawColor(225,220,208); doc.line(14, y, 196, y); y += 10;
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('Total pagado:', 14, y);
+  doc.text(fmtMoney(p.montoPagado), 60, y);
+  y += 16;
+  doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(140);
+  doc.text('Comprobante generado por el sistema de gestión de cuotas.', 14, y);
+  doc.autoPrint();
+  doc.output('dataurlnewwindow');
+}
+function exportarDeudoresPDF(){
+  const deudores = STATE.alumnos.filter(a=>a.activo).map(a=>({a, r:resumenAlumno(a.id)})).filter(x=>x.r.cantidadPendiente>0)
+    .sort((x,y)=>y.r.maxAtraso-x.r.maxAtraso);
+  if(deudores.length===0){ UI.alertaMsg='No hay deudores para exportar.'; render(); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  encabezadoPDF(doc, 'Listado de alumnos con cuotas pendientes');
+  doc.setFontSize(9); doc.setTextColor(90);
+  doc.text(`Generado el ${fmtFecha(nuevaFechaISO())} · ${deudores.length} alumnos`, 14, 46);
+  doc.autoTable({
+    startY: 50,
+    head: [['Alumno','Curso','DNI','Tutor / Teléfono','Días atraso','Deuda']],
+    body: deudores.map(({a,r})=>[
+      `${a.apellidos}, ${a.nombres}`,
+      a.curso||'-',
+      a.dni||'-',
+      `${a.tutorApellido||''} ${a.tutorNombre||''}\n${a.telefonoTutor||a.telefono||''}`.trim(),
+      r.maxAtraso>0 ? `${r.maxAtraso} días` : '-',
+      fmtMoney(r.totalAdeudado)
+    ]),
+    styles: { fontSize: 8, cellPadding: 3 },
+    headStyles: { fillColor: [161,72,58] },
+    columnStyles: { 5: { halign:'right', fontStyle:'bold' } }
+  });
+  doc.save(`deudores_${nuevaFechaISO()}.pdf`);
 }
 
 /* ======================= RENDER ======================= */
@@ -287,7 +397,7 @@ function post(){ lucide.createIcons(); }
 
 function vistaLogin(){
   return `
-  <div class="h-full w-full flex items-center justify-center px-4" style="background:radial-gradient(circle at 30% 20%, #7695bb 0%, #1e293f 70%);">
+  <div class="h-full w-full flex items-center justify-center px-4" style="background:radial-gradient(circle at 30% 20%, #c98979 0%, #2a1f1c 70%);">
     <div class="card w-full max-w-sm p-6 sm:p-8">
       <div class="flex items-center gap-3 mb-1">
         <img src="${window.LOGO_DATA_URL||''}" alt="Instituto San José" class="logo-img" style="background:transparent; padding:0;">
@@ -330,6 +440,8 @@ function vistaPrincipal(){
     {id:'dashboard', label:'Panel', icono:'layout-dashboard', solo:false},
     {id:'alumnos', label:'Alumnos', icono:'users', solo:false},
     {id:'cobros', label:'Cobros', icono:'wallet', solo:false},
+    {id:'caja', label:'Caja', icono:'archive', solo:false},
+    {id:'estadisticas', label:'Estadísticas', icono:'bar-chart-3', solo:false},
     {id:'alertas', label:'Alertas de mora', icono:'alert-triangle', solo:false},
     {id:'config', label:'Configuración', icono:'settings', solo:true},
   ];
@@ -353,7 +465,7 @@ function vistaPrincipal(){
       <nav class="space-y-1 flex-1">${nav}</nav>
       <div class="border-t border-white/10 pt-3 px-2">
         <p class="text-xs text-slate-400">${SESSION.nombre}</p>
-        <p class="text-xs font-semibold mb-2" style="color:#8fb0d6">${SESSION.rol==='super'?'Superusuario':'Cobrador/a'}</p>
+        <p class="text-xs font-semibold mb-2" style="color:#d9a99a">${SESSION.rol==='super'?'Superusuario':'Cobrador/a'}</p>
         <button onclick="logout()" class="text-xs text-slate-300 hover:text-white flex items-center gap-1">${icon('log-out','w-3.5 h-3.5')} Cerrar sesión</button>
       </div>
     </aside>
@@ -368,6 +480,8 @@ function vistaPrincipal(){
         ${ TAB==='dashboard' ? vistaDashboard() :
            TAB==='alumnos' ? vistaAlumnos() :
            TAB==='cobros' ? vistaCobros() :
+           TAB==='caja' ? vistaCaja() :
+           TAB==='estadisticas' ? vistaEstadisticas() :
            TAB==='alertas' ? vistaAlertas() :
            TAB==='config' ? vistaConfig() : '' }
       </main>
@@ -401,7 +515,7 @@ function vistaDashboard(){
     <h2 class="text-2xl font-display font-bold mb-1">Panel general</h2>
     <p class="text-sm text-gray-500 mb-6">${mesNombre(periodoAct)}</p>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#eaf1f7] text-[#46658a]')}
+      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#f6ece9] text-[#8a3c30]')}
       ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-[#eef5ec] text-[#5b8a53]')}
       ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-[#faf1de] text-[#b17d2e]')}
       ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-[#fbe9e5] text-[#a8493a]')}
@@ -415,12 +529,12 @@ function vistaDashboard(){
 function tablaUltimosPagos(){
   const pagos = [...STATE.pagos].sort((a,b)=> (b.fecha).localeCompare(a.fecha)).slice(0,8);
   if(pagos.length===0) return `<p class="text-sm text-gray-400">Todavía no hay cobros registrados.</p>`;
-  return `<table class="tbl w-full text-sm"><thead><tr><th class="text-left">Alumno</th><th class="text-left">Período</th><th class="text-left">Método</th><th class="text-right">Monto</th><th class="text-left">Fecha</th></tr></thead><tbody>
+  return `<div class="overflow-x-auto"><table class="tbl w-full text-sm"><thead><tr><th class="text-left">Alumno</th><th class="text-left">Período</th><th class="text-left">Método</th><th class="text-right">Monto</th><th class="text-left">Fecha</th><th></th></tr></thead><tbody>
     ${pagos.map(p=>{
       const a = STATE.alumnos.find(x=>x.id===p.alumnoId);
-      return `<tr><td>${a?a.apellidos+', '+a.nombres:'—'}</td><td>${mesNombre(p.periodo)}</td><td><span class="badge-${p.metodo==='efectivo'?'ok':'muted'} text-xs px-2 py-0.5 rounded-full">${p.metodo==='efectivo'?'Efectivo':'Transferencia'}</span></td><td class="text-right font-medium">${fmtMoney(p.montoPagado)}</td><td>${fmtFecha(p.fecha)}</td></tr>`;
+      return `<tr><td>${a?a.apellidos+', '+a.nombres:'—'}</td><td>${mesNombre(p.periodo)}</td><td><span class="badge-${p.metodo==='efectivo'?'ok':'muted'} text-xs px-2 py-0.5 rounded-full">${p.metodo==='efectivo'?'Efectivo':'Transferencia'}</span></td><td class="text-right font-medium">${fmtMoney(p.montoPagado)}</td><td>${fmtFecha(p.fecha)}</td><td class="text-right"><button onclick="generarComprobantePDF('${p.id}')" class="text-xs text-[#a1483a] font-medium whitespace-nowrap">Comprobante</button></td></tr>`;
     }).join('')}
-  </tbody></table>`;
+  </tbody></table></div>`;
 }
 
 /* ---------- ALUMNOS ---------- */
@@ -429,15 +543,10 @@ function vistaAlumnos(){
     <div class="flex items-center justify-between mb-6">
       <div><h2 class="text-2xl font-display font-bold">Alumnos</h2><p class="text-sm text-gray-500">${STATE.alumnos.length} registrados · ${STATE.alumnos.filter(a=>a.activo).length} activos</p></div>
       ${esSuper() ? `
-      <div>
+      <div class="flex items-center gap-2">
         <input type="file" id="fileCsv" accept=".csv" class="hidden" onchange="procesarCSV(this.files[0])">
-        <div class="flex items-center gap-2">
-          <select id="encSelect" onchange="UI.importEncoding=this.value" class="!w-auto text-xs">
-            <option value="utf-8" ${UI.importEncoding==='utf-8'?'selected':''}>Codificación: UTF-8</option>
-            <option value="latin1" ${UI.importEncoding==='latin1'?'selected':''}>Codificación: Latin-1 (Excel/Windows)</option>
-          </select>
-          <button onclick="document.getElementById('fileCsv').click()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">${icon('upload','w-4 h-4')} Importar CSV</button>
-        </div>
+        ${STATE.alumnos.length>0 ? `<button onclick="confirmarBorrarAlumnos()" class="px-3 py-2 rounded-lg text-xs font-semibold border text-[#a8493a]" style="border-color:var(--border)">Borrar todos</button>` : ''}
+        <button onclick="document.getElementById('fileCsv').click()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">${icon('upload','w-4 h-4')} Importar CSV</button>
       </div>` : ''}
     </div>
     <div class="card overflow-x-auto">
@@ -467,44 +576,246 @@ function vistaAlumnos(){
 }
 
 /* ---------- COBROS ---------- */
+function agruparPorCurso(alumnos){
+  const grupos = {};
+  alumnos.forEach(a=>{
+    const clave = a.curso || 'Sin curso asignado';
+    if(!grupos[clave]) grupos[clave] = [];
+    grupos[clave].push(a);
+  });
+  return Object.keys(grupos).sort((a,b)=>a.localeCompare(b,'es')).map(curso=>({curso, alumnos:grupos[curso]}));
+}
 function vistaCobros(){
   const q = (UI.busqueda||'').toLowerCase();
-  const lista = STATE.alumnos.filter(a=> !q || (a.apellidos+' '+a.nombres+' '+(a.dni||'')).toLowerCase().includes(q));
+  const soloDeudores = UI.soloDeudores!==false;
+  let lista = STATE.alumnos.filter(a=> !q || (a.apellidos+' '+a.nombres+' '+(a.dni||'')).toLowerCase().includes(q));
+  if(soloDeudores) lista = lista.filter(a=>resumenAlumno(a.id).cantidadPendiente>0);
+  const grupos = agruparPorCurso(lista);
   return `
     <h2 class="text-2xl font-display font-bold mb-1">Cobros</h2>
-    <p class="text-sm text-gray-500 mb-6">Registrá pagos en efectivo o transferencia por alumno y período.</p>
-    <input type="text" placeholder="Buscar alumno por nombre o DNI..." value="${UI.busqueda||''}" oninput="UI.busqueda=this.value; render();" class="max-w-sm mb-5">
-    <div class="space-y-3">
-      ${lista.map(a=>{
-        const r = resumenAlumno(a.id);
-        if(r.cantidadPendiente===0){
-          return `<div class="card p-4 flex items-center justify-between opacity-70">
-            <div><p class="font-medium text-sm">${a.apellidos}, ${a.nombres}</p><p class="text-xs text-gray-400">${a.curso||''}</p></div>
-            <span class="badge-ok text-xs px-2 py-0.5 rounded-full">Sin cuotas pendientes</span>
-          </div>`;
-        }
-        return `<div class="card p-4">
-          <div class="flex items-center justify-between mb-3">
-            <div><p class="font-medium text-sm">${a.apellidos}, ${a.nombres}</p><p class="text-xs text-gray-400">${a.curso||''} · DNI ${a.dni||'-'}</p></div>
-            <p class="text-sm font-semibold text-[#a8493a]">${fmtMoney(r.totalAdeudado)} adeudado</p>
-          </div>
-          <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            ${r.pendientes.map(c=>`
-              <div class="border rounded-lg p-3 flex items-center justify-between text-xs" style="border-color:var(--border)">
-                <div>
-                  <p class="font-semibold text-sm">${mesNombre(c.periodo)}</p>
-                  <p class="text-gray-500">Vence ${fmtFecha(c.vencimiento)}${c.diasAtraso>0?` · ${c.diasAtraso} días de atraso`:''}</p>
-                  <p class="mt-1">${c.pct>0?`<span class="text-[#a8493a] font-medium">+${c.pct}% mora</span> · `:''}<span class="font-semibold">${fmtMoney(c.montoConMora)}</span></p>
-                </div>
-                <button onclick='abrirModalPago("${a.id}","${c.periodo}")' class="btn-primary px-3 py-1.5 rounded-md font-semibold">Cobrar</button>
+    <p class="text-sm text-gray-500 mb-4">Registrá pagos en efectivo o transferencia, agrupados por curso.</p>
+    <div class="flex flex-wrap items-center gap-3 mb-5">
+      <input type="text" placeholder="Buscar alumno por nombre o DNI..." value="${UI.busqueda||''}" oninput="UI.busqueda=this.value; render();" class="max-w-sm">
+      <label class="flex items-center gap-2 text-xs text-gray-500 select-none">
+        <input type="checkbox" ${soloDeudores?'checked':''} onchange="UI.soloDeudores=this.checked; render();">
+        Mostrar solo alumnos con deuda
+      </label>
+    </div>
+    ${grupos.length===0 ? `<p class="text-gray-400 text-sm">No se encontraron alumnos.</p>` :
+    grupos.map(g=>`
+      <div class="mb-7">
+        <h3 class="font-display font-bold text-sm text-gray-600 mb-2 flex items-center gap-2">
+          ${icon('layers','w-4 h-4 text-gray-400')} ${g.curso} <span class="text-gray-400 font-normal">(${g.alumnos.length})</span>
+        </h3>
+        <div class="card divide-y" style="border-color:var(--border)">
+          ${g.alumnos.map(a=>{
+            const r = resumenAlumno(a.id);
+            if(r.cantidadPendiente===0){
+              return `<div class="p-4 flex items-center justify-between">
+                <div><p class="font-medium text-sm">${a.apellidos}, ${a.nombres}</p><p class="text-xs text-gray-400">DNI ${a.dni||'-'}</p></div>
+                <span class="badge-ok text-xs px-2 py-0.5 rounded-full">Al día</span>
+              </div>`;
+            }
+            return `<div class="p-4">
+              <div class="flex items-center justify-between mb-2">
+                <div><p class="font-medium text-sm">${a.apellidos}, ${a.nombres}</p><p class="text-xs text-gray-400">DNI ${a.dni||'-'}</p></div>
+                <p class="text-sm font-semibold text-[#a1483a]">${fmtMoney(r.totalAdeudado)} adeudado</p>
               </div>
-            `).join('')}
-          </div>
-        </div>`;
-      }).join('') || `<p class="text-gray-400 text-sm">No se encontraron alumnos.</p>`}
+              <ul class="space-y-1.5">
+                ${r.pendientes.map(c=>`
+                  <li class="flex items-center justify-between text-xs bg-[#faf8f3] rounded-lg px-3 py-2">
+                    <span>
+                      <span class="font-semibold">${mesNombre(c.periodo)}</span>
+                      <span class="text-gray-500"> · vence ${fmtFecha(c.vencimiento)}${c.diasAtraso>0?` · ${c.diasAtraso}d atraso`:''}</span>
+                      ${c.pct>0?` · <span class="text-[#a1483a] font-medium">+${c.pct}% mora</span>`:''}
+                      · <span class="font-semibold">${fmtMoney(c.montoConMora)}</span>
+                    </span>
+                    <button onclick='abrirModalPago("${a.id}","${c.periodo}")' class="btn-primary px-3 py-1 rounded-md font-semibold shrink-0 ml-2">Cobrar</button>
+                  </li>
+                `).join('')}
+              </ul>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+/* ---------- CAJA ---------- */
+function rangoDeCaja(){
+  const hoy = nuevaFechaISO();
+  if(UI.cajaPreset==='hoy') return { desde:hoy, hasta:hoy };
+  if(UI.cajaPreset==='semana'){
+    const d = new Date(hoy+'T00:00:00');
+    const diaSemana = d.getDay();
+    const lunes = new Date(d); lunes.setDate(d.getDate() - ((diaSemana+6)%7));
+    return { desde: lunes.toISOString().slice(0,10), hasta: hoy };
+  }
+  if(UI.cajaPreset==='mes') return { desde: hoy.slice(0,7)+'-01', hasta: hoy };
+  return { desde: UI.cajaDesde, hasta: UI.cajaHasta };
+}
+function vistaCaja(){
+  const { desde, hasta } = rangoDeCaja();
+  const movimientos = STATE.pagos.filter(p=> p.fecha>=desde && p.fecha<=hasta).sort((a,b)=> b.fecha.localeCompare(a.fecha));
+  const totalEfectivo = movimientos.filter(p=>p.metodo==='efectivo').reduce((s,p)=>s+p.montoPagado,0);
+  const totalTransferencia = movimientos.filter(p=>p.metodo==='transferencia').reduce((s,p)=>s+p.montoPagado,0);
+  const total = totalEfectivo + totalTransferencia;
+  const presets = [ {id:'hoy', label:'Hoy'}, {id:'semana', label:'Esta semana'}, {id:'mes', label:'Este mes'}, {id:'custom', label:'Personalizado'} ];
+  return `
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-1">
+      <h2 class="text-2xl font-display font-bold">Caja</h2>
+      ${movimientos.length>0 ? `<button onclick="exportarCajaPDF()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">${icon('file-down','w-4 h-4')} Exportar (PDF)</button>` : ''}
+    </div>
+    <p class="text-sm text-gray-500 mb-4">Movimientos de efectivo y transferencia del período seleccionado.</p>
+    <div class="flex flex-wrap items-center gap-2 mb-5">
+      ${presets.map(p=>`<button onclick="UI.cajaPreset='${p.id}'; render();" class="px-3 py-1.5 rounded-lg text-xs font-semibold border ${UI.cajaPreset===p.id?'btn-primary':''}" style="${UI.cajaPreset!==p.id?'border-color:var(--border)':''}">${p.label}</button>`).join('')}
+      ${UI.cajaPreset==='custom' ? `
+        <input type="date" value="${UI.cajaDesde}" onchange="UI.cajaDesde=this.value; render();" class="!w-auto">
+        <span class="text-gray-400 text-xs">a</span>
+        <input type="date" value="${UI.cajaHasta}" onchange="UI.cajaHasta=this.value; render();" class="!w-auto">
+      ` : ''}
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+      <div class="card p-5"><p class="text-xs text-gray-500 font-medium mb-1">Efectivo</p><p class="text-xl font-display font-bold">${fmtMoney(totalEfectivo)}</p></div>
+      <div class="card p-5"><p class="text-xs text-gray-500 font-medium mb-1">Transferencia</p><p class="text-xl font-display font-bold">${fmtMoney(totalTransferencia)}</p></div>
+      <div class="card p-5 col-span-2 md:col-span-1" style="background:#faf3ee; border-color:#e8d6cd;"><p class="text-xs font-medium mb-1" style="color:#a1483a">Total del período</p><p class="text-xl font-display font-bold" style="color:#a1483a">${fmtMoney(total)}</p></div>
+    </div>
+    <div class="card overflow-x-auto">
+      <table class="tbl w-full text-sm">
+        <thead><tr><th class="text-left">Fecha</th><th class="text-left">Alumno</th><th class="text-left">Curso</th><th class="text-left">Período cuota</th><th class="text-left">Método</th><th class="text-right">Monto</th><th></th></tr></thead>
+        <tbody>
+        ${movimientos.length===0 ? `<tr><td colspan="7" class="text-center text-gray-400 py-8">No hay movimientos en este período.</td></tr>` :
+        movimientos.map(p=>{
+          const a = STATE.alumnos.find(x=>x.id===p.alumnoId);
+          return `<tr>
+            <td>${fmtFecha(p.fecha)}</td>
+            <td>${a?a.apellidos+', '+a.nombres:'—'}</td>
+            <td>${a?a.curso||'-':'-'}</td>
+            <td>${mesNombre(p.periodo)}</td>
+            <td><span class="badge-${p.metodo==='efectivo'?'ok':'muted'} text-xs px-2 py-0.5 rounded-full">${p.metodo==='efectivo'?'Efectivo':'Transferencia'}</span></td>
+            <td class="text-right font-medium">${fmtMoney(p.montoPagado)}</td>
+            <td class="text-right"><button onclick="generarComprobantePDF('${p.id}')" class="text-xs text-[#a1483a] font-medium whitespace-nowrap">Comprobante</button></td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
     </div>
   `;
 }
+function exportarCajaPDF(){
+  const { desde, hasta } = rangoDeCaja();
+  const movimientos = STATE.pagos.filter(p=> p.fecha>=desde && p.fecha<=hasta).sort((a,b)=> a.fecha.localeCompare(b.fecha));
+  const totalEfectivo = movimientos.filter(p=>p.metodo==='efectivo').reduce((s,p)=>s+p.montoPagado,0);
+  const totalTransferencia = movimientos.filter(p=>p.metodo==='transferencia').reduce((s,p)=>s+p.montoPagado,0);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  encabezadoPDF(doc, 'Caja — ' + (desde===hasta ? fmtFecha(desde) : `${fmtFecha(desde)} al ${fmtFecha(hasta)}`));
+  doc.setFontSize(10);
+  doc.text(`Total efectivo: ${fmtMoney(totalEfectivo)}   ·   Total transferencia: ${fmtMoney(totalTransferencia)}   ·   Total general: ${fmtMoney(totalEfectivo+totalTransferencia)}`, 14, 46);
+  doc.autoTable({
+    startY: 52,
+    head: [['Fecha','Alumno','Curso','Período','Método','Monto']],
+    body: movimientos.map(p=>{
+      const a = STATE.alumnos.find(x=>x.id===p.alumnoId);
+      return [fmtFecha(p.fecha), a?`${a.apellidos}, ${a.nombres}`:'—', a?a.curso||'-':'-', mesNombre(p.periodo), p.metodo==='efectivo'?'Efectivo':'Transferencia', fmtMoney(p.montoPagado)];
+    }),
+    styles: { fontSize: 8, cellPadding: 3 },
+    headStyles: { fillColor: [161,72,58] },
+    columnStyles: { 5: { halign:'right', fontStyle:'bold' } }
+  });
+  doc.save(`caja_${desde}_a_${hasta}.pdf`);
+}
+
+/* ---------- ESTADÍSTICAS ---------- */
+function aniosDisponibles(){
+  const anios = new Set(STATE.pagos.map(p=>p.fecha.slice(0,4)));
+  anios.add(nuevaFechaISO().slice(0,4));
+  return Array.from(anios).sort().reverse();
+}
+function statsMensuales(anio){
+  const meses = Array.from({length:12}, (_,i)=>({mes:i+1, efectivo:0, transferencia:0, total:0}));
+  STATE.pagos.filter(p=>p.fecha.slice(0,4)===anio).forEach(p=>{
+    const idx = parseInt(p.fecha.slice(5,7),10)-1;
+    meses[idx][p.metodo] = (meses[idx][p.metodo]||0) + p.montoPagado;
+    meses[idx].total += p.montoPagado;
+  });
+  return meses;
+}
+function statsTrimestrales(anio){
+  const mensual = statsMensuales(anio);
+  const trims = [0,1,2,3].map(t=>({trimestre:t+1, efectivo:0, transferencia:0, total:0}));
+  mensual.forEach((m,i)=>{
+    const t = Math.floor(i/3);
+    trims[t].efectivo += m.efectivo; trims[t].transferencia += m.transferencia; trims[t].total += m.total;
+  });
+  return trims;
+}
+function statsAnuales(){
+  const porAnio = {};
+  STATE.pagos.forEach(p=>{
+    const y = p.fecha.slice(0,4);
+    if(!porAnio[y]) porAnio[y] = {anio:y, efectivo:0, transferencia:0, total:0};
+    porAnio[y][p.metodo] += p.montoPagado; porAnio[y].total += p.montoPagado;
+  });
+  return Object.values(porAnio).sort((a,b)=>b.anio.localeCompare(a.anio));
+}
+function barraComparativa(label, item, max){
+  const pctEf = max>0 ? (item.efectivo/max*100) : 0;
+  const pctTr = max>0 ? (item.transferencia/max*100) : 0;
+  return `
+    <div class="mb-3">
+      <div class="flex items-center justify-between text-xs mb-1">
+        <span class="font-medium text-gray-600">${label}</span>
+        <span class="font-semibold">${fmtMoney(item.total)}</span>
+      </div>
+      <div class="w-full h-2.5 rounded-full overflow-hidden flex bg-[#f1eee6]">
+        <div style="width:${pctEf}%; background:#6b9a63;" title="Efectivo: ${fmtMoney(item.efectivo)}"></div>
+        <div style="width:${pctTr}%; background:#a1483a;" title="Transferencia: ${fmtMoney(item.transferencia)}"></div>
+      </div>
+    </div>`;
+}
+function vistaEstadisticas(){
+  const anios = aniosDisponibles();
+  const anio = UI.statsAnio || anios[0];
+  const mensual = statsMensuales(anio);
+  const trimestral = statsTrimestrales(anio);
+  const anual = statsAnuales();
+  const nombresMes = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const maxMensual = Math.max(1, ...mensual.map(m=>m.total));
+  const maxTrimestral = Math.max(1, ...trimestral.map(t=>t.total));
+  const maxAnual = Math.max(1, ...anual.map(a=>a.total));
+  const totalAnioSel = mensual.reduce((s,m)=>s+m.total,0);
+  return `
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-1">
+      <h2 class="text-2xl font-display font-bold">Estadísticas</h2>
+      <select onchange="UI.statsAnio=this.value; render();" class="!w-auto text-sm">
+        ${anios.map(a=>`<option value="${a}" ${a===anio?'selected':''}>${a}</option>`).join('')}
+      </select>
+    </div>
+    <p class="text-sm text-gray-500 mb-2">Total recaudado en ${anio}: <span class="font-semibold" style="color:#a1483a">${fmtMoney(totalAnioSel)}</span></p>
+    <div class="flex items-center gap-4 text-xs text-gray-500 mb-6">
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#6b9a63"></span> Efectivo</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#a1483a"></span> Transferencia</span>
+    </div>
+
+    <div class="card p-5 mb-6">
+      <h3 class="font-display font-bold mb-4">Mensual</h3>
+      ${mensual.map((m,i)=> barraComparativa(nombresMes[i], m, maxMensual)).join('')}
+    </div>
+
+    <div class="card p-5 mb-6">
+      <h3 class="font-display font-bold mb-4">Trimestral</h3>
+      ${trimestral.map(t=> barraComparativa('T'+t.trimestre, t, maxTrimestral)).join('')}
+    </div>
+
+    <div class="card p-5">
+      <h3 class="font-display font-bold mb-4">Anual</h3>
+      ${anual.length===0 ? `<p class="text-sm text-gray-400">Todavía no hay cobros registrados.</p>` :
+        anual.map(a=> barraComparativa(a.anio, a, maxAnual)).join('')}
+    </div>
+  `;
+}
+
 function abrirModalPago(alumnoId, periodo){ UI._modalPago = { alumnoId, periodo, metodo:'efectivo' }; render(); }
 function cerrarModalPago(){ UI._modalPago=null; render(); }
 function modalPago(){
@@ -538,8 +849,11 @@ function modalPago(){
 function vistaAlertas(){
   const conAlerta = STATE.alumnos.filter(a=>a.activo).map(a=>({a, r:resumenAlumno(a.id)})).filter(x=>x.r.maxAtraso>30);
   return `
-    <h2 class="text-2xl font-display font-bold mb-1">Alertas de mora</h2>
-    <p class="text-sm text-gray-500 mb-6">Alumnos con cuotas pendientes hace más de un mes (30+ días de atraso).</p>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-1">
+      <h2 class="text-2xl font-display font-bold">Alertas de mora</h2>
+      <button onclick="exportarDeudoresPDF()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">${icon('file-down','w-4 h-4')} Exportar deudores (PDF)</button>
+    </div>
+    <p class="text-sm text-gray-500 mb-6">Alumnos con cuotas pendientes hace más de un mes (30+ días de atraso). El PDF exporta a todos los que tienen alguna deuda, no solo estos.</p>
     ${conAlerta.length===0 ? `<div class="card p-8 text-center text-gray-400">${icon('check-circle-2','w-8 h-8 mx-auto mb-2 text-[#6b9a63]')}<p>No hay alumnos con más de un mes de mora.</p></div>` : `
     <div class="space-y-3">
       ${conAlerta.sort((x,y)=>y.r.maxAtraso-x.r.maxAtraso).map(({a,r})=>`
@@ -550,7 +864,7 @@ function vistaAlertas(){
               <p class="text-xs text-gray-500 mt-0.5">Tutor: ${a.tutorApellido||''} ${a.tutorNombre||''} · Tel: ${a.telefonoTutor||a.telefono||'sin dato'}</p>
             </div>
             <div class="text-right">
-              <p class="text-[#a8493a] font-bold">${fmtMoney(r.totalAdeudado)}</p>
+              <p class="text-[#a1483a] font-bold">${fmtMoney(r.totalAdeudado)}</p>
               <p class="text-xs text-gray-500">${r.maxAtraso} días de atraso · ${r.cantidadPendiente} cuota(s)</p>
             </div>
           </div>

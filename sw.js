@@ -2,7 +2,7 @@
 // navegador ofrezca "Instalar app" / "Agregar a pantalla de inicio", y dar
 // algo de resiliencia offline para la interfaz (no para los datos, que
 // siempre vienen de Firebase y necesitan conexión).
-const CACHE_NAME = 'cuotas-isj-v1';
+const CACHE_NAME = 'cuotas-isj-v2';
 const ARCHIVOS_SHELL = [
   './',
   './index.html',
