@@ -1,7 +1,13 @@
-// Función serverless (se ejecuta en Vercel, nunca en el navegador).
-// Usa la SUPABASE_SERVICE_ROLE_KEY, que solo vive como variable de entorno
-// en Vercel. Verifica que quien llama sea superusuario antes de crear nada.
-import { createClient } from '@supabase/supabase-js';
+// Función serverless (corre en Vercel, nunca en el navegador).
+// Usa la cuenta de servicio de Firebase, guardada como variable de entorno secreta,
+// para crear usuarios de Authentication y su perfil en Firestore.
+import admin from 'firebase-admin';
+
+function getAdminApp() {
+  if (admin.apps.length) return admin.app();
+  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  return admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -14,28 +20,25 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'No autenticado' });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceKey) {
-    return res.status(500).json({ error: 'Faltan variables de entorno en el servidor' });
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+    return res.status(500).json({ error: 'Falta la variable de entorno FIREBASE_SERVICE_ACCOUNT en el servidor' });
   }
 
-  const admin = createClient(supabaseUrl, serviceKey);
+  const app = getAdminApp();
+  const auth = app.auth();
+  const db = app.firestore();
 
-  // 1) Verificar que el token pertenece a un usuario real
-  const { data: tokenData, error: tokenError } = await admin.auth.getUser(token);
-  if (tokenError || !tokenData?.user) {
+  // 1) Verificar que el token pertenece a un usuario real de Firebase Auth
+  let decoded;
+  try {
+    decoded = await auth.verifyIdToken(token);
+  } catch (e) {
     return res.status(401).json({ error: 'Token inválido' });
   }
 
   // 2) Verificar que ese usuario es superusuario
-  const { data: perfil, error: perfilError } = await admin
-    .from('profiles')
-    .select('rol')
-    .eq('id', tokenData.user.id)
-    .single();
-
-  if (perfilError || !perfil || perfil.rol !== 'super') {
+  const perfilSnap = await db.collection('usuarios').doc(decoded.uid).get();
+  if (!perfilSnap.exists || perfilSnap.data().rol !== 'super') {
     return res.status(403).json({ error: 'Solo el superusuario puede crear usuarios' });
   }
 
@@ -48,25 +51,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Rol inválido' });
   }
 
-  const { data: nuevoUsuario, error: createError } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true
-  });
-  if (createError) {
-    return res.status(400).json({ error: createError.message });
+  let nuevoUsuario;
+  try {
+    nuevoUsuario = await auth.createUser({ email, password });
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
   }
 
-  const { error: profileError } = await admin.from('profiles').insert({
-    id: nuevoUsuario.user.id,
-    email,
-    nombre: nombre || email,
-    rol
-  });
-  if (profileError) {
-    // si falla la creación del perfil, deshacemos el usuario de auth para no dejarlo huérfano
-    await admin.auth.admin.deleteUser(nuevoUsuario.user.id);
-    return res.status(400).json({ error: profileError.message });
+  try {
+    await db.collection('usuarios').doc(nuevoUsuario.uid).set({
+      email, nombre: nombre || email, rol
+    });
+  } catch (e) {
+    // si falla la creación del perfil, deshacemos el usuario de Auth para no dejarlo huérfano
+    await auth.deleteUser(nuevoUsuario.uid);
+    return res.status(400).json({ error: e.message });
   }
 
   return res.status(200).json({ ok: true });
