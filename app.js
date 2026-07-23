@@ -7,7 +7,7 @@ const db = firebase.firestore();
 let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
 let SESSION = null; // { id, email, rol, nombre, access_token }
 let TAB = 'dashboard';
-let UI = { alertaMsg:null, alertaLogin:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null, cursosAbiertos:{}, dashboardFiltro:null };
+let UI = { alertaMsg:null, alertaLogin:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', busquedaAlumnos:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null, cursosAbiertos:{}, aniosAbiertos:{}, dashboardFiltro:null };
 
 /* ======================= UTILIDADES ======================= */
 function fmtMoney(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0}); }
@@ -415,24 +415,35 @@ function post(){ lucide.createIcons(); }
 
 function vistaLogin(){
   return `
-  <div class="h-full w-full flex items-center justify-center px-4" style="background:radial-gradient(circle at 30% 20%, #c98979 0%, #2a1f1c 70%);">
-    <div class="card w-full max-w-sm p-6 sm:p-8">
-      <div class="flex items-center gap-3 mb-1">
-        <img src="${window.LOGO_DATA_URL||''}" alt="Instituto San José" class="logo-img" style="background:transparent; padding:0;">
+  <div class="h-full w-full flex flex-col md:flex-row overflow-y-auto">
+    <div class="md:w-[42%] md:min-h-full flex flex-col justify-between px-8 py-10 md:py-14 shrink-0" style="background:radial-gradient(circle at 25% 15%, #c98979 0%, var(--sidebar-2) 65%);">
+      <div class="flex items-center gap-3">
+        <img src="${window.LOGO_DATA_URL||''}" alt="Instituto San José" class="logo-img" style="width:48px;height:52px;">
         <div>
-          <h1 class="text-lg sm:text-xl font-display font-bold leading-tight">Gestión de Cuotas</h1>
-          <p class="text-xs text-gray-400">Instituto San José · Quines, San Luis</p>
+          <p class="font-display font-bold text-white text-lg leading-tight">Instituto San José</p>
+          <p class="text-xs" style="color:#d9b8ab">Quines, San Luis</p>
         </div>
       </div>
-      <p class="text-sm text-gray-500 mt-3 mb-6">Control y cobro de cuotas escolares</p>
-      ${UI.alertaLogin ? `<div class="badge-danger text-xs rounded-lg p-3 mb-4">${UI.alertaLogin}</div>` : ''}
-      <form id="loginForm" onsubmit="manejarLogin(event)">
-        <label class="lbl">Email</label>
-        <input id="lu" type="text" class="mb-3" placeholder="tu@email.com" autofocus>
-        <label class="lbl">Contraseña</label>
-        <input id="lc" type="password" class="mb-1" placeholder="••••••••">
-        <button type="submit" id="loginBtn" class="btn-primary w-full mt-4 py-2.5 rounded-lg font-semibold text-sm">Ingresar</button>
-      </form>
+      <div class="hidden md:block mt-10">
+        <h1 class="font-display font-bold text-3xl text-white leading-tight mb-3">Gestión de<br>Cuotas</h1>
+        <p class="text-sm max-w-xs" style="color:#e3d3ca">Control y cobro de cuotas escolares en efectivo o transferencia, con alertas de mora y estadísticas al día.</p>
+      </div>
+      <p class="text-[11px] hidden md:block" style="color:#a08e83">Desarrollado por Prof. Maidan Marcos Exequiel</p>
+    </div>
+    <div class="flex-1 flex items-center justify-center px-4 py-10 md:py-4">
+      <div class="w-full max-w-sm">
+        <h2 class="font-display font-bold text-xl mb-1">Iniciar sesión</h2>
+        <p class="text-sm text-gray-500 mb-6">Ingresá con tu cuenta para continuar.</p>
+        ${UI.alertaLogin ? `<div class="badge-danger text-xs rounded-lg p-3 mb-4">${UI.alertaLogin}</div>` : ''}
+        <form id="loginForm" onsubmit="manejarLogin(event)">
+          <label class="lbl">Email</label>
+          <input id="lu" type="text" class="mb-3" placeholder="tu@email.com" autofocus>
+          <label class="lbl">Contraseña</label>
+          <input id="lc" type="password" class="mb-1" placeholder="••••••••">
+          <button type="submit" id="loginBtn" class="btn-primary w-full mt-4 py-2.5 rounded-lg font-semibold text-sm">Ingresar</button>
+        </form>
+        <p class="text-[11px] text-gray-400 mt-8 md:hidden text-center">Desarrollado por Prof. Maidan Marcos Exequiel</p>
+      </div>
     </div>
   </div>`;
 }
@@ -457,7 +468,7 @@ function vistaPrincipal(){
   const items = [
     {id:'dashboard', label:'Panel', icono:'layout-dashboard', solo:false},
     {id:'alumnos', label:'Alumnos', icono:'users', solo:false},
-    {id:'cobros', label:'Cobros', icono:'wallet', solo:false},
+    {id:'cobros', label:'Sistema de cobros', icono:'wallet', solo:false},
     {id:'caja', label:'Caja', icono:'archive', solo:false},
     {id:'estadisticas', label:'Estadísticas', icono:'bar-chart-3', solo:false},
     {id:'alertas', label:'Alertas de mora', icono:'alert-triangle', solo:false},
@@ -484,7 +495,8 @@ function vistaPrincipal(){
       <div class="border-t border-white/10 pt-3 px-2">
         <p class="text-xs text-slate-400">${SESSION.nombre}</p>
         <p class="text-xs font-semibold mb-2" style="color:#d9a99a">${SESSION.rol==='super'?'Superusuario':'Cobrador/a'}</p>
-        <button onclick="logout()" class="text-xs text-slate-300 hover:text-white flex items-center gap-1">${icon('log-out','w-3.5 h-3.5')} Cerrar sesión</button>
+        <button onclick="logout()" class="text-xs text-slate-300 hover:text-white flex items-center gap-1 mb-3">${icon('log-out','w-3.5 h-3.5')} Cerrar sesión</button>
+        <p class="text-[10px] text-slate-500 leading-tight border-t border-white/5 pt-2">Desarrollado por<br><span class="text-slate-400">Prof. Maidan Marcos Exequiel</span></p>
       </div>
     </aside>
     <div class="flex-1 flex flex-col min-w-0">
@@ -523,8 +535,8 @@ function vistaDashboard(){
   });
   const recaudadoMes = STATE.pagos.filter(p=>p.fecha.slice(0,7)===periodoAct).reduce((s,p)=>s+p.montoPagado,0);
 
-  const kpi = (label, valor, iconoNombre, colorClass, filtro)=>`
-    <div class="card p-5 flex items-center gap-4 ${filtro?'cursor-pointer hover:shadow-md transition':''}" style="${UI.dashboardFiltro===filtro && filtro?'box-shadow:0 0 0 2px var(--accent);':''}" ${filtro?`onclick="UI.dashboardFiltro=(UI.dashboardFiltro==='${filtro}'?null:'${filtro}'); render();"`:''}>
+  const kpi = (label, valor, iconoNombre, colorClass, filtro, accentColor)=>`
+    <div class="card kpi-card p-5 flex items-center gap-4 ${filtro?'cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition':''}" style="--kpi-color:${accentColor}; ${UI.dashboardFiltro===filtro && filtro?'box-shadow:0 0 0 2px var(--accent);':''}" ${filtro?`onclick="UI.dashboardFiltro=(UI.dashboardFiltro==='${filtro}'?null:'${filtro}'); render();"`:''}>
       <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${colorClass}">${icon(iconoNombre,'w-5 h-5')}</div>
       <div><p class="text-xs text-gray-500 font-medium">${label}</p><p class="text-xl font-display font-bold">${valor}</p></div>
     </div>`;
@@ -533,10 +545,10 @@ function vistaDashboard(){
     <h2 class="text-2xl font-display font-bold mb-1">Panel general</h2>
     <p class="text-sm text-gray-500 mb-6">${mesNombre(periodoAct)} · hacé clic en una tarjeta para filtrar</p>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#f6ece9] text-[#8a3c30]', null)}
-      ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-[#eef5ec] text-[#5b8a53]', 'alDia')}
-      ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-[#faf1de] text-[#b17d2e]', 'enMora')}
-      ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-[#fbe9e5] text-[#a8493a]', 'mora1mes')}
+      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#f6ece9] text-[#8a3c30]', null, '#8a3c30')}
+      ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-[#eef5ec] text-[#5b8a53]', 'alDia', '#6b9a63')}
+      ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-[#faf1de] text-[#b17d2e]', 'enMora', '#c98f35')}
+      ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-[#fbe9e5] text-[#a8493a]', 'mora1mes', '#a1483a')}
     </div>
     ${UI.dashboardFiltro ? panelFiltroDashboard() : `
     <div class="card p-5">
@@ -581,9 +593,46 @@ function tablaUltimosPagos(){
 }
 
 /* ---------- ALUMNOS ---------- */
+function extraerAnio(curso){
+  if(!curso) return 'Sin año asignado';
+  const partes = curso.split(' - ');
+  return partes[0].trim();
+}
+function agruparPorAnio(alumnos){
+  const grupos = {};
+  alumnos.forEach(a=>{
+    const anio = extraerAnio(a.curso);
+    if(!grupos[anio]) grupos[anio] = [];
+    grupos[anio].push(a);
+  });
+  return Object.keys(grupos).sort((a,b)=>{
+    const na = claveOrdenCurso(a), nb = claveOrdenCurso(b);
+    return na!==nb ? na-nb : a.localeCompare(b,'es');
+  }).map(anio=>({anio, alumnos:grupos[anio]}));
+}
+function filaAlumnoInfo(a){
+  const r = resumenAlumno(a.id);
+  const badge = r.cantidadPendiente===0 ? `<span class="badge-ok text-xs px-2 py-0.5 rounded-full">Al día</span>`
+    : r.maxAtraso>30 ? `<span class="badge-danger text-xs px-2 py-0.5 rounded-full">Mora +1 mes</span>`
+    : `<span class="badge-warn text-xs px-2 py-0.5 rounded-full">En mora</span>`;
+  return `<div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
+    <div class="min-w-0">
+      <p class="font-medium truncate">${a.apellidos}, ${a.nombres}</p>
+      <p class="text-xs text-gray-400 truncate">DNI ${a.dni||'-'}${a.tutorApellido?` · Tutor: ${a.tutorApellido} ${a.tutorNombre||''}`:''}</p>
+    </div>
+    <div class="flex items-center gap-3 shrink-0">
+      ${r.totalAdeudado>0?`<span class="text-xs font-semibold text-[#a1483a]">${fmtMoney(r.totalAdeudado)}</span>`:''}
+      ${badge}
+      ${esSuper()?`<button onclick="eliminarAlumno('${a.id}')" title="Eliminar alumno" class="text-gray-400 hover:text-[#a1483a] transition">${icon('trash-2','w-4 h-4')}</button>`:''}
+    </div>
+  </div>`;
+}
 function vistaAlumnos(){
+  const q = (UI.busquedaAlumnos||'').toLowerCase();
+  const filtrados = STATE.alumnos.filter(a=> !q || (a.apellidos+' '+a.nombres+' '+(a.dni||'')).toLowerCase().includes(q));
+  const grupos = agruparPorAnio(filtrados);
   return `
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
       <div><h2 class="text-2xl font-display font-bold">Alumnos</h2><p class="text-sm text-gray-500">${STATE.alumnos.length} registrados · ${STATE.alumnos.filter(a=>a.activo).length} activos</p></div>
       ${esSuper() ? `
       <div class="flex items-center gap-2">
@@ -592,30 +641,29 @@ function vistaAlumnos(){
         <button onclick="document.getElementById('fileCsv').click()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">${icon('upload','w-4 h-4')} Importar CSV</button>
       </div>` : ''}
     </div>
-    <div class="card overflow-x-auto">
-      <table class="tbl w-full text-sm">
-        <thead><tr><th class="text-left">Apellido y Nombre</th><th class="text-left">DNI</th><th class="text-left">Curso</th><th class="text-left">Turno</th><th class="text-left">Tutor</th><th class="text-right">Deuda</th><th class="text-center">Estado</th>${esSuper()?'<th></th>':''}</tr></thead>
-        <tbody>
-        ${STATE.alumnos.length===0 ? `<tr><td colspan="8" class="text-center text-gray-400 py-8">No hay alumnos cargados todavía. ${esSuper()?'Importá el CSV para comenzar.':'Pedile al superusuario que importe el listado.'}</td></tr>` :
-        STATE.alumnos.map(a=>{
-          const r = resumenAlumno(a.id);
-          const badge = r.cantidadPendiente===0 ? `<span class="badge-ok text-xs px-2 py-0.5 rounded-full">Al día</span>`
-            : r.maxAtraso>30 ? `<span class="badge-danger text-xs px-2 py-0.5 rounded-full">Mora +1 mes</span>`
-            : `<span class="badge-warn text-xs px-2 py-0.5 rounded-full">En mora</span>`;
-          return `<tr>
-            <td class="font-medium">${a.apellidos}, ${a.nombres}</td>
-            <td>${a.dni||'-'}</td>
-            <td>${a.curso||'-'}</td>
-            <td>${a.turno||'-'}</td>
-            <td class="text-xs text-gray-500">${a.tutorApellido||''} ${a.tutorNombre||''}<br>${a.telefonoTutor||a.telefono||''}</td>
-            <td class="text-right ${r.totalAdeudado>0?'text-[#a8493a] font-semibold':'text-gray-400'}">${r.totalAdeudado>0?fmtMoney(r.totalAdeudado):'—'}</td>
-            <td class="text-center">${badge}</td>
-            ${esSuper()?`<td class="text-right"><button onclick="eliminarAlumno('${a.id}')" title="Eliminar alumno" class="text-gray-400 hover:text-[#a1483a]">${icon('trash-2','w-4 h-4')}</button></td>`:''}
-          </tr>`;
-        }).join('')}
-        </tbody>
-      </table>
-    </div>
+    <input type="text" placeholder="Buscar alumno por nombre o DNI..." value="${UI.busquedaAlumnos||''}" oninput="UI.busquedaAlumnos=this.value; render();" class="max-w-sm mb-5">
+    ${grupos.length===0 ? `<p class="text-gray-400 text-sm">${STATE.alumnos.length===0 ? (esSuper()?'No hay alumnos cargados todavía. Importá el CSV para comenzar.':'Pedile al superusuario que importe el listado.') : 'No se encontraron alumnos.'}</p>` :
+    grupos.map(g=>{
+      const abierto = !!UI.aniosAbiertos[g.anio];
+      const divisiones = agruparPorCurso(g.alumnos);
+      return `
+      <div class="mb-4">
+        <button onclick="UI.aniosAbiertos['${g.anio}']=!UI.aniosAbiertos['${g.anio}']; render();" class="w-full flex items-center justify-between text-left font-display font-bold text-sm text-gray-600 mb-2 px-1">
+          <span class="flex items-center gap-2">${icon('graduation-cap','w-4 h-4 text-gray-400')} ${g.anio} <span class="text-gray-400 font-normal">(${g.alumnos.length} alumnos)</span></span>
+          ${icon(abierto?'chevron-up':'chevron-down','w-4 h-4 text-gray-400')}
+        </button>
+        ${abierto ? divisiones.map(d=>{
+          const nombreDivision = d.curso.includes(' - ') ? 'División '+d.curso.split(' - ')[1] : d.curso;
+          return `
+          <div class="mb-3">
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 px-1">${nombreDivision}</p>
+            <div class="card divide-y" style="border-color:var(--border)">
+              ${d.alumnos.map(a=>filaAlumnoInfo(a)).join('')}
+            </div>
+          </div>`;
+        }).join('') : ''}
+      </div>`;
+    }).join('')}
   `;
 }
 
@@ -672,7 +720,7 @@ function vistaCobros(){
     deudores: g.alumnos.filter(a=>resumenAlumno(a.id).cantidadPendiente>0)
   }));
   return `
-    <h2 class="text-2xl font-display font-bold mb-1">Cobros</h2>
+    <h2 class="text-2xl font-display font-bold mb-1">Sistema de cobros de alumnos</h2>
     <p class="text-sm text-gray-500 mb-4">Agrupados por curso. Por defecto se muestran los que tienen deuda; hacé clic en un curso para ver la división completa.</p>
     <input type="text" placeholder="Buscar alumno por nombre o DNI..." value="${UI.busqueda||''}" oninput="UI.busqueda=this.value; render();" class="max-w-sm mb-5">
     ${grupos.length===0 ? `<p class="text-gray-400 text-sm">No se encontraron alumnos.</p>` :
