@@ -105,16 +105,24 @@ function initApp(){
   });
 }
 async function establecerSesion(user){
-  const perfilSnap = await db.collection('usuarios').doc(user.uid).get();
-  if(!perfilSnap.exists){
+  try{
+    const perfilSnap = await db.collection('usuarios').doc(user.uid).get();
+    if(!perfilSnap.exists){
+      await auth.signOut();
+      SESSION = null;
+      UI.alertaLogin = `No existe un perfil en la colección "usuarios" para el UID ${user.uid}. Revisá que el documento tenga exactamente ese ID.`;
+      return;
+    }
+    const perfil = perfilSnap.data();
+    const token = await user.getIdToken();
+    SESSION = { id: user.uid, email: user.email, rol: perfil.rol, nombre: perfil.nombre, access_token: token };
+    await cargarDatos();
+  }catch(e){
+    console.error('[gestion-cuotas] Error al establecer sesión:', e);
     await auth.signOut();
     SESSION = null;
-    return;
+    UI.alertaLogin = 'Error de Firestore: ' + (e && e.message ? e.message : e);
   }
-  const perfil = perfilSnap.data();
-  const token = await user.getIdToken();
-  SESSION = { id: user.uid, email: user.email, rol: perfil.rol, nombre: perfil.nombre, access_token: token };
-  await cargarDatos();
 }
 async function cargarDatos(){
   const [cfgSnap, alumnosSnap, pagosSnap] = await Promise.all([
@@ -286,6 +294,7 @@ function vistaLogin(){
         <h1 class="text-xl font-display font-bold">Gestión de Cuotas</h1>
       </div>
       <p class="text-sm text-gray-500 mb-6">Control y cobro de cuotas escolares</p>
+      ${UI.alertaLogin ? `<div class="bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg p-3 mb-4">${UI.alertaLogin}</div>` : ''}
       <form id="loginForm" onsubmit="manejarLogin(event)">
         <label class="lbl">Email</label>
         <input id="lu" type="text" class="mb-3" placeholder="tu@email.com" autofocus>
@@ -303,18 +312,15 @@ function vistaLogin(){
 async function manejarLogin(e){
   e.preventDefault();
   const btn = document.getElementById('loginBtn');
-  const lerr = document.getElementById('lerr');
   btn.disabled = true; btn.textContent = 'Ingresando...';
-  lerr.classList.add('hidden');
+  UI.alertaLogin = null;
   const email = document.getElementById('lu').value.trim();
   const clave = document.getElementById('lc').value;
   const ok = await login(email, clave);
-  if(ok){
-    render();
-  }else{
-    lerr.classList.remove('hidden');
-    btn.disabled = false; btn.textContent = 'Ingresar';
+  if(!ok && !UI.alertaLogin){
+    UI.alertaLogin = 'Usuario o contraseña incorrectos.';
   }
+  render();
 }
 
 function vistaPrincipal(){
