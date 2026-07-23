@@ -7,7 +7,7 @@ const db = firebase.firestore();
 let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
 let SESSION = null; // { id, email, rol, nombre, access_token }
 let TAB = 'dashboard';
-let UI = { alertaMsg:null, alertaLogin:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null };
+let UI = { alertaMsg:null, alertaLogin:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null, cursosAbiertos:{}, dashboardFiltro:null };
 
 /* ======================= UTILIDADES ======================= */
 function fmtMoney(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0}); }
@@ -235,6 +235,24 @@ async function insertarEnLotes(coleccion, items){
     refs.forEach(r=>creados.push({ id: r.ref.id, ...r.data }));
   }
   return creados;
+}
+async function eliminarAlumno(id){
+  const a = STATE.alumnos.find(x=>x.id===id);
+  const ok = confirm(`¿Eliminar a ${a?a.apellidos+', '+a.nombres:'este alumno'}? También se borran sus pagos registrados. No se puede deshacer.`);
+  if(!ok) return;
+  try{
+    const pagosDelAlumno = STATE.pagos.filter(p=>p.alumnoId===id).map(p=>p.id);
+    const batch = db.batch();
+    batch.delete(db.collection('alumnos').doc(id));
+    pagosDelAlumno.forEach(pid=> batch.delete(db.collection('pagos').doc(pid)));
+    await batch.commit();
+    STATE.alumnos = STATE.alumnos.filter(a=>a.id!==id);
+    STATE.pagos = STATE.pagos.filter(p=>p.alumnoId!==id);
+    UI.alertaMsg = 'Alumno eliminado.';
+  }catch(e){
+    UI.alertaMsg = 'Error al eliminar: '+e.message;
+  }
+  render();
 }
 async function confirmarBorrarAlumnos(){
   const cantidad = STATE.alumnos.length;
@@ -505,26 +523,51 @@ function vistaDashboard(){
   });
   const recaudadoMes = STATE.pagos.filter(p=>p.fecha.slice(0,7)===periodoAct).reduce((s,p)=>s+p.montoPagado,0);
 
-  const kpi = (label, valor, iconoNombre, colorClass)=>`
-    <div class="card p-5 flex items-center gap-4">
-      <div class="w-11 h-11 rounded-xl flex items-center justify-center ${colorClass}">${icon(iconoNombre,'w-5 h-5')}</div>
+  const kpi = (label, valor, iconoNombre, colorClass, filtro)=>`
+    <div class="card p-5 flex items-center gap-4 ${filtro?'cursor-pointer hover:shadow-md transition':''}" style="${UI.dashboardFiltro===filtro && filtro?'box-shadow:0 0 0 2px var(--accent);':''}" ${filtro?`onclick="UI.dashboardFiltro=(UI.dashboardFiltro==='${filtro}'?null:'${filtro}'); render();"`:''}>
+      <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${colorClass}">${icon(iconoNombre,'w-5 h-5')}</div>
       <div><p class="text-xs text-gray-500 font-medium">${label}</p><p class="text-xl font-display font-bold">${valor}</p></div>
     </div>`;
 
   return `
     <h2 class="text-2xl font-display font-bold mb-1">Panel general</h2>
-    <p class="text-sm text-gray-500 mb-6">${mesNombre(periodoAct)}</p>
+    <p class="text-sm text-gray-500 mb-6">${mesNombre(periodoAct)} · hacé clic en una tarjeta para filtrar</p>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#f6ece9] text-[#8a3c30]')}
-      ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-[#eef5ec] text-[#5b8a53]')}
-      ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-[#faf1de] text-[#b17d2e]')}
-      ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-[#fbe9e5] text-[#a8493a]')}
+      ${kpi('Recaudado este mes', fmtMoney(recaudadoMes), 'banknote', 'bg-[#f6ece9] text-[#8a3c30]', null)}
+      ${kpi('Alumnos al día', alDia, 'check-circle-2', 'bg-[#eef5ec] text-[#5b8a53]', 'alDia')}
+      ${kpi('En mora (≤ 1 mes)', enMora, 'clock', 'bg-[#faf1de] text-[#b17d2e]', 'enMora')}
+      ${kpi('Mora +1 mes', masDeUnMes, 'alert-triangle', 'bg-[#fbe9e5] text-[#a8493a]', 'mora1mes')}
     </div>
+    ${UI.dashboardFiltro ? panelFiltroDashboard() : `
     <div class="card p-5">
       <h3 class="font-display font-bold mb-4">Últimos cobros registrados</h3>
       ${tablaUltimosPagos()}
-    </div>
+    </div>`}
   `;
+}
+function panelFiltroDashboard(){
+  const activos = STATE.alumnos.filter(a=>a.activo);
+  let lista = [], titulo = '';
+  if(UI.dashboardFiltro==='alDia'){ lista = activos.filter(a=>resumenAlumno(a.id).cantidadPendiente===0); titulo = 'Alumnos al día'; }
+  else if(UI.dashboardFiltro==='enMora'){ lista = activos.filter(a=>{ const r=resumenAlumno(a.id); return r.cantidadPendiente>0 && r.maxAtraso<=30; }); titulo = 'Alumnos en mora (≤ 1 mes)'; }
+  else if(UI.dashboardFiltro==='mora1mes'){ lista = activos.filter(a=>resumenAlumno(a.id).maxAtraso>30); titulo = 'Alumnos con mora +1 mes'; }
+  return `
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-display font-bold">${titulo} <span class="text-gray-400 font-normal text-sm">(${lista.length})</span></h3>
+        <button onclick="UI.dashboardFiltro=null; render();" class="text-xs text-gray-500 flex items-center gap-1">${icon('x','w-3.5 h-3.5')} Cerrar</button>
+      </div>
+      ${lista.length===0 ? `<p class="text-sm text-gray-400">No hay alumnos en esta categoría.</p>` : `
+      <div class="divide-y" style="border-color:var(--border)">
+        ${lista.map(a=>{
+          const r = resumenAlumno(a.id);
+          return `<div class="flex items-center justify-between py-2.5 text-sm">
+            <span>${a.apellidos}, ${a.nombres} <span class="text-gray-400 text-xs">· ${a.curso||''}</span></span>
+            ${r.totalAdeudado>0 ? `<span class="font-semibold text-[#a1483a]">${fmtMoney(r.totalAdeudado)}</span>` : `<span class="badge-ok text-xs px-2 py-0.5 rounded-full">Al día</span>`}
+          </div>`;
+        }).join('')}
+      </div>`}
+    </div>`;
 }
 function tablaUltimosPagos(){
   const pagos = [...STATE.pagos].sort((a,b)=> (b.fecha).localeCompare(a.fecha)).slice(0,8);
@@ -532,7 +575,7 @@ function tablaUltimosPagos(){
   return `<div class="overflow-x-auto"><table class="tbl w-full text-sm"><thead><tr><th class="text-left">Alumno</th><th class="text-left">Período</th><th class="text-left">Método</th><th class="text-right">Monto</th><th class="text-left">Fecha</th><th></th></tr></thead><tbody>
     ${pagos.map(p=>{
       const a = STATE.alumnos.find(x=>x.id===p.alumnoId);
-      return `<tr><td>${a?a.apellidos+', '+a.nombres:'—'}</td><td>${mesNombre(p.periodo)}</td><td><span class="badge-${p.metodo==='efectivo'?'ok':'muted'} text-xs px-2 py-0.5 rounded-full">${p.metodo==='efectivo'?'Efectivo':'Transferencia'}</span></td><td class="text-right font-medium">${fmtMoney(p.montoPagado)}</td><td>${fmtFecha(p.fecha)}</td><td class="text-right"><button onclick="generarComprobantePDF('${p.id}')" class="text-xs text-[#a1483a] font-medium whitespace-nowrap">Comprobante</button></td></tr>`;
+      return `<tr><td>${a?a.apellidos+', '+a.nombres:'—'}</td><td>${mesNombre(p.periodo)}</td><td>${badgeMetodo(p.metodo)}</td><td class="text-right font-medium">${fmtMoney(p.montoPagado)}</td><td>${fmtFecha(p.fecha)}</td><td class="text-right"><button onclick="generarComprobantePDF('${p.id}')" class="text-xs text-[#a1483a] font-medium whitespace-nowrap">Comprobante</button></td></tr>`;
     }).join('')}
   </tbody></table></div>`;
 }
@@ -551,9 +594,9 @@ function vistaAlumnos(){
     </div>
     <div class="card overflow-x-auto">
       <table class="tbl w-full text-sm">
-        <thead><tr><th class="text-left">Apellido y Nombre</th><th class="text-left">DNI</th><th class="text-left">Curso</th><th class="text-left">Turno</th><th class="text-left">Tutor</th><th class="text-right">Deuda</th><th class="text-center">Estado</th></tr></thead>
+        <thead><tr><th class="text-left">Apellido y Nombre</th><th class="text-left">DNI</th><th class="text-left">Curso</th><th class="text-left">Turno</th><th class="text-left">Tutor</th><th class="text-right">Deuda</th><th class="text-center">Estado</th>${esSuper()?'<th></th>':''}</tr></thead>
         <tbody>
-        ${STATE.alumnos.length===0 ? `<tr><td colspan="7" class="text-center text-gray-400 py-8">No hay alumnos cargados todavía. ${esSuper()?'Importá el CSV para comenzar.':'Pedile al superusuario que importe el listado.'}</td></tr>` :
+        ${STATE.alumnos.length===0 ? `<tr><td colspan="8" class="text-center text-gray-400 py-8">No hay alumnos cargados todavía. ${esSuper()?'Importá el CSV para comenzar.':'Pedile al superusuario que importe el listado.'}</td></tr>` :
         STATE.alumnos.map(a=>{
           const r = resumenAlumno(a.id);
           const badge = r.cantidadPendiente===0 ? `<span class="badge-ok text-xs px-2 py-0.5 rounded-full">Al día</span>`
@@ -567,6 +610,7 @@ function vistaAlumnos(){
             <td class="text-xs text-gray-500">${a.tutorApellido||''} ${a.tutorNombre||''}<br>${a.telefonoTutor||a.telefono||''}</td>
             <td class="text-right ${r.totalAdeudado>0?'text-[#a8493a] font-semibold':'text-gray-400'}">${r.totalAdeudado>0?fmtMoney(r.totalAdeudado):'—'}</td>
             <td class="text-center">${badge}</td>
+            ${esSuper()?`<td class="text-right"><button onclick="eliminarAlumno('${a.id}')" title="Eliminar alumno" class="text-gray-400 hover:text-[#a1483a]">${icon('trash-2','w-4 h-4')}</button></td>`:''}
           </tr>`;
         }).join('')}
         </tbody>
@@ -576,6 +620,12 @@ function vistaAlumnos(){
 }
 
 /* ---------- COBROS ---------- */
+function normalizarTexto(s){ return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+function claveOrdenCurso(curso){
+  const mapaOrdinal = {primer:1, primero:1, segundo:2, tercer:3, tercero:3, cuarto:4, quinto:5, sexto:6, septimo:7, octavo:8, noveno:9};
+  const match = normalizarTexto(curso).match(/^(primer|primero|segundo|tercer|tercero|cuarto|quinto|sexto|septimo|octavo|noveno)/);
+  return match ? (mapaOrdinal[match[1]]||99) : 99;
+}
 function agruparPorCurso(alumnos){
   const grupos = {};
   alumnos.forEach(a=>{
@@ -583,62 +633,64 @@ function agruparPorCurso(alumnos){
     if(!grupos[clave]) grupos[clave] = [];
     grupos[clave].push(a);
   });
-  return Object.keys(grupos).sort((a,b)=>a.localeCompare(b,'es')).map(curso=>({curso, alumnos:grupos[curso]}));
+  return Object.keys(grupos).sort((a,b)=>{
+    const na = claveOrdenCurso(a), nb = claveOrdenCurso(b);
+    return na!==nb ? na-nb : a.localeCompare(b,'es');
+  }).map(curso=>({curso, alumnos:grupos[curso]}));
+}
+function badgeMetodo(metodo){
+  const esEf = metodo==='efectivo';
+  return `<span class="badge-${esEf?'ok':'muted'} text-xs px-2 py-0.5 rounded-full inline-flex items-center gap-1">${icon(esEf?'banknote':'landmark','w-3 h-3')}${esEf?'Efectivo':'Transferencia'}</span>`;
+}
+function filaCobroAlumno(a){
+  const r = resumenAlumno(a.id);
+  if(r.cantidadPendiente===0){
+    return `<div class="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+      <span class="font-medium truncate">${a.apellidos}, ${a.nombres} <span class="text-gray-400 font-normal text-xs">· DNI ${a.dni||'-'}</span></span>
+      <span class="badge-ok text-xs px-2 py-0.5 rounded-full shrink-0">Al día</span>
+    </div>`;
+  }
+  return r.pendientes.map(c=>`
+    <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm">
+      <span class="font-medium truncate">${a.apellidos}, ${a.nombres} <span class="text-gray-400 font-normal text-xs">· DNI ${a.dni||'-'}</span></span>
+      <span class="flex items-center gap-2 text-xs text-gray-500 shrink-0">
+        <span class="font-semibold text-gray-700">${mesNombre(c.periodo)}</span>
+        ${c.diasAtraso>0?`<span>${c.diasAtraso}d atraso</span>`:''}
+        ${c.pct>0?`<span class="text-[#a1483a] font-medium">+${c.pct}%</span>`:''}
+        <span class="font-semibold text-gray-800">${fmtMoney(c.montoConMora)}</span>
+      </span>
+      <button onclick='abrirModalPago("${a.id}","${c.periodo}")' class="btn-primary px-3 py-1.5 rounded-md font-semibold flex items-center gap-1.5 shrink-0">${icon('hand-coins','w-3.5 h-3.5')} Cobrar</button>
+    </div>
+  `).join('');
 }
 function vistaCobros(){
   const q = (UI.busqueda||'').toLowerCase();
-  const soloDeudores = UI.soloDeudores!==false;
-  let lista = STATE.alumnos.filter(a=> !q || (a.apellidos+' '+a.nombres+' '+(a.dni||'')).toLowerCase().includes(q));
-  if(soloDeudores) lista = lista.filter(a=>resumenAlumno(a.id).cantidadPendiente>0);
-  const grupos = agruparPorCurso(lista);
+  const candidatos = STATE.alumnos.filter(a=> !q || (a.apellidos+' '+a.nombres+' '+(a.dni||'')).toLowerCase().includes(q));
+  const grupos = agruparPorCurso(candidatos).map(g=>({
+    curso: g.curso,
+    todos: g.alumnos,
+    deudores: g.alumnos.filter(a=>resumenAlumno(a.id).cantidadPendiente>0)
+  }));
   return `
     <h2 class="text-2xl font-display font-bold mb-1">Cobros</h2>
-    <p class="text-sm text-gray-500 mb-4">Registrá pagos en efectivo o transferencia, agrupados por curso.</p>
-    <div class="flex flex-wrap items-center gap-3 mb-5">
-      <input type="text" placeholder="Buscar alumno por nombre o DNI..." value="${UI.busqueda||''}" oninput="UI.busqueda=this.value; render();" class="max-w-sm">
-      <label class="flex items-center gap-2 text-xs text-gray-500 select-none">
-        <input type="checkbox" ${soloDeudores?'checked':''} onchange="UI.soloDeudores=this.checked; render();">
-        Mostrar solo alumnos con deuda
-      </label>
-    </div>
+    <p class="text-sm text-gray-500 mb-4">Agrupados por curso. Por defecto se muestran los que tienen deuda; hacé clic en un curso para ver la división completa.</p>
+    <input type="text" placeholder="Buscar alumno por nombre o DNI..." value="${UI.busqueda||''}" oninput="UI.busqueda=this.value; render();" class="max-w-sm mb-5">
     ${grupos.length===0 ? `<p class="text-gray-400 text-sm">No se encontraron alumnos.</p>` :
-    grupos.map(g=>`
-      <div class="mb-7">
-        <h3 class="font-display font-bold text-sm text-gray-600 mb-2 flex items-center gap-2">
-          ${icon('layers','w-4 h-4 text-gray-400')} ${g.curso} <span class="text-gray-400 font-normal">(${g.alumnos.length})</span>
-        </h3>
+    grupos.map(g=>{
+      const abierto = !!UI.cursosAbiertos[g.curso];
+      const lista = abierto ? g.todos : g.deudores;
+      return `
+      <div class="mb-4">
+        <button onclick="UI.cursosAbiertos['${g.curso}']=!UI.cursosAbiertos['${g.curso}']; render();" class="w-full flex items-center justify-between text-left font-display font-bold text-sm text-gray-600 mb-2 px-1">
+          <span class="flex items-center gap-2">${icon('layers','w-4 h-4 text-gray-400')} ${g.curso} <span class="text-gray-400 font-normal">(${g.deudores.length} con deuda · ${g.todos.length} en total)</span></span>
+          ${icon(abierto?'chevron-up':'chevron-down','w-4 h-4 text-gray-400')}
+        </button>
         <div class="card divide-y" style="border-color:var(--border)">
-          ${g.alumnos.map(a=>{
-            const r = resumenAlumno(a.id);
-            if(r.cantidadPendiente===0){
-              return `<div class="p-4 flex items-center justify-between">
-                <div><p class="font-medium text-sm">${a.apellidos}, ${a.nombres}</p><p class="text-xs text-gray-400">DNI ${a.dni||'-'}</p></div>
-                <span class="badge-ok text-xs px-2 py-0.5 rounded-full">Al día</span>
-              </div>`;
-            }
-            return `<div class="p-4">
-              <div class="flex items-center justify-between mb-2">
-                <div><p class="font-medium text-sm">${a.apellidos}, ${a.nombres}</p><p class="text-xs text-gray-400">DNI ${a.dni||'-'}</p></div>
-                <p class="text-sm font-semibold text-[#a1483a]">${fmtMoney(r.totalAdeudado)} adeudado</p>
-              </div>
-              <ul class="space-y-1.5">
-                ${r.pendientes.map(c=>`
-                  <li class="flex items-center justify-between text-xs bg-[#faf8f3] rounded-lg px-3 py-2">
-                    <span>
-                      <span class="font-semibold">${mesNombre(c.periodo)}</span>
-                      <span class="text-gray-500"> · vence ${fmtFecha(c.vencimiento)}${c.diasAtraso>0?` · ${c.diasAtraso}d atraso`:''}</span>
-                      ${c.pct>0?` · <span class="text-[#a1483a] font-medium">+${c.pct}% mora</span>`:''}
-                      · <span class="font-semibold">${fmtMoney(c.montoConMora)}</span>
-                    </span>
-                    <button onclick='abrirModalPago("${a.id}","${c.periodo}")' class="btn-primary px-3 py-1 rounded-md font-semibold shrink-0 ml-2">Cobrar</button>
-                  </li>
-                `).join('')}
-              </ul>
-            </div>`;
-          }).join('')}
+          ${lista.length===0 ? `<p class="text-xs text-gray-400 p-4">${abierto?'No hay alumnos en este curso.':'Nadie debe en este curso. Hacé clic arriba para ver la división completa.'}</p>` :
+            lista.map(a=>filaCobroAlumno(a)).join('')}
         </div>
-      </div>
-    `).join('')}
+      </div>`;
+    }).join('')}
   `;
 }
 /* ---------- CAJA ---------- */
@@ -692,7 +744,7 @@ function vistaCaja(){
             <td>${a?a.apellidos+', '+a.nombres:'—'}</td>
             <td>${a?a.curso||'-':'-'}</td>
             <td>${mesNombre(p.periodo)}</td>
-            <td><span class="badge-${p.metodo==='efectivo'?'ok':'muted'} text-xs px-2 py-0.5 rounded-full">${p.metodo==='efectivo'?'Efectivo':'Transferencia'}</span></td>
+            <td>${badgeMetodo(p.metodo)}</td>
             <td class="text-right font-medium">${fmtMoney(p.montoPagado)}</td>
             <td class="text-right"><button onclick="generarComprobantePDF('${p.id}')" class="text-xs text-[#a1483a] font-medium whitespace-nowrap">Comprobante</button></td>
           </tr>`;
@@ -774,6 +826,41 @@ function barraComparativa(label, item, max){
       </div>
     </div>`;
 }
+function distribucionAlumnos(){
+  const activos = STATE.alumnos.filter(a=>a.activo);
+  let alDia=0, debenSinInteres=0, debenConInteres=0;
+  activos.forEach(a=>{
+    const r = resumenAlumno(a.id);
+    if(r.cantidadPendiente===0){ alDia++; return; }
+    const conInteres = r.pendientes.some(c=>c.pct>0);
+    if(conInteres) debenConInteres++; else debenSinInteres++;
+  });
+  return { alDia, debenSinInteres, debenConInteres, total: activos.length };
+}
+function graficoTortaAlumnos(){
+  const d = distribucionAlumnos();
+  const total = Math.max(1, d.total);
+  const p1 = d.alDia/total*100;
+  const p2 = d.debenSinInteres/total*100;
+  const gradiente = `conic-gradient(#6b9a63 0% ${p1}%, #c98f35 ${p1}% ${p1+p2}%, #a1483a ${p1+p2}% 100%)`;
+  return `
+    <div class="card p-5 mb-6">
+      <h3 class="font-display font-bold mb-4">Distribución de alumnos</h3>
+      <div class="flex flex-wrap items-center gap-8">
+        <div class="shrink-0" style="width:140px;height:140px;position:relative;">
+          <div style="position:absolute; top:0; left:0; right:0; bottom:0; border-radius:9999px; background:${gradiente};"></div>
+          <div style="position:absolute; top:24px; left:24px; right:24px; bottom:24px; border-radius:9999px; background:var(--panel); display:flex; align-items:center; justify-content:center; text-align:center;">
+            <div><p class="text-lg font-display font-bold">${d.total}</p><p class="text-[10px] text-gray-400">alumnos activos</p></div>
+          </div>
+        </div>
+        <div class="space-y-2.5 text-sm">
+          <p class="flex items-center gap-2"><span class="w-3 h-3 rounded-full inline-block shrink-0" style="background:#6b9a63"></span>Al día — <span class="font-semibold">${d.alDia}</span></p>
+          <p class="flex items-center gap-2"><span class="w-3 h-3 rounded-full inline-block shrink-0" style="background:#c98f35"></span>Deben, sin mora todavía — <span class="font-semibold">${d.debenSinInteres}</span></p>
+          <p class="flex items-center gap-2"><span class="w-3 h-3 rounded-full inline-block shrink-0" style="background:#a1483a"></span>Deben con interés aplicado — <span class="font-semibold">${d.debenConInteres}</span></p>
+        </div>
+      </div>
+    </div>`;
+}
 function vistaEstadisticas(){
   const anios = aniosDisponibles();
   const anio = UI.statsAnio || anios[0];
@@ -792,8 +879,11 @@ function vistaEstadisticas(){
         ${anios.map(a=>`<option value="${a}" ${a===anio?'selected':''}>${a}</option>`).join('')}
       </select>
     </div>
-    <p class="text-sm text-gray-500 mb-2">Total recaudado en ${anio}: <span class="font-semibold" style="color:#a1483a">${fmtMoney(totalAnioSel)}</span></p>
-    <div class="flex items-center gap-4 text-xs text-gray-500 mb-6">
+    <p class="text-sm text-gray-500 mb-6">Total recaudado en ${anio}: <span class="font-semibold" style="color:#a1483a">${fmtMoney(totalAnioSel)}</span></p>
+
+    ${graficoTortaAlumnos()}
+
+    <div class="flex items-center gap-4 text-xs text-gray-500 mb-3">
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#6b9a63"></span> Efectivo</span>
       <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#a1483a"></span> Transferencia</span>
     </div>
@@ -834,8 +924,8 @@ function modalPago(){
       </div>
       <label class="lbl">Método de pago</label>
       <div class="grid grid-cols-2 gap-2 mb-4">
-        <button onclick="UI._modalPago.metodo='efectivo'; render();" class="py-2 rounded-lg text-sm font-semibold border ${metodo==='efectivo'?'btn-primary':''}" style="${metodo!=='efectivo'?'border-color:var(--border)':''}">Efectivo</button>
-        <button onclick="UI._modalPago.metodo='transferencia'; render();" class="py-2 rounded-lg text-sm font-semibold border ${metodo==='transferencia'?'btn-primary':''}" style="${metodo!=='transferencia'?'border-color:var(--border)':''}">Transferencia</button>
+        <button onclick="UI._modalPago.metodo='efectivo'; render();" class="py-2 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 ${metodo==='efectivo'?'btn-primary':''}" style="${metodo!=='efectivo'?'border-color:var(--border)':''}">${icon('banknote','w-4 h-4')} Efectivo</button>
+        <button onclick="UI._modalPago.metodo='transferencia'; render();" class="py-2 rounded-lg text-sm font-semibold border flex items-center justify-center gap-2 ${metodo==='transferencia'?'btn-primary':''}" style="${metodo!=='transferencia'?'border-color:var(--border)':''}">${icon('landmark','w-4 h-4')} Transferencia</button>
       </div>
       <div class="flex gap-2 mt-5">
         <button onclick="cerrarModalPago()" class="flex-1 py-2 rounded-lg text-sm font-semibold border" style="border-color:var(--border)">Cancelar</button>
