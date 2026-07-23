@@ -341,7 +341,7 @@ function vistaPrincipal(){
   return `
   <div class="flex h-full w-full relative">
     ${UI.sidebarAbierto ? `<div class="fixed inset-0 bg-black/40 z-40 md:hidden" onclick="UI.sidebarAbierto=false; render();"></div>` : ''}
-    <aside class="sidebar w-64 shrink-0 flex flex-col p-4 fixed md:static inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-out ${UI.sidebarAbierto ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0">
+    <aside class="sidebar safe-top safe-bottom w-64 shrink-0 flex flex-col p-4 fixed md:static inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-out ${UI.sidebarAbierto ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0">
       <div class="flex items-center gap-2 px-2 mb-6 mt-1">
         <img src="${window.LOGO_DATA_URL||''}" alt="Instituto San José" class="logo-img">
         <div>
@@ -358,7 +358,7 @@ function vistaPrincipal(){
       </div>
     </aside>
     <div class="flex-1 flex flex-col min-w-0">
-      <header class="md:hidden flex items-center gap-3 px-4 py-3 border-b bg-white sticky top-0 z-30" style="border-color:var(--border)">
+      <header class="md:hidden safe-top flex items-center gap-3 px-4 py-3 border-b bg-white sticky top-0 z-30" style="border-color:var(--border)">
         <button onclick="UI.sidebarAbierto=true; render();" class="text-gray-600">${icon('menu','w-6 h-6')}</button>
         <img src="${window.LOGO_DATA_URL||''}" alt="" class="logo-img" style="width:28px;height:30px;">
         <span class="font-display font-bold text-sm">Gestión de Cuotas</span>

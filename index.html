@@ -2,8 +2,20 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Gestión de Cuotas — Escuela</title>
+
+<!-- PWA: permite "Agregar a pantalla de inicio" en Android/iOS y que la app
+     abra a pantalla completa, como una app nativa. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1e293f">
+<meta name="background-color" content="#f8f4ec">
+<link rel="icon" href="icons/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cuotas ISJ">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <!-- SDK "compat" de Firebase: expone el objeto global `firebase`, así el resto del código
@@ -50,6 +62,8 @@
   input:focus, select:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:transparent;}
   label.lbl{font-size:12px; font-weight:600; color:var(--muted); display:block; margin-bottom:4px;}
   .logo-img{width:40px; height:44px; object-fit:contain; border-radius:8px; background:#fff; padding:3px;}
+  .safe-top{padding-top:env(safe-area-inset-top);}
+  .safe-bottom{padding-bottom:env(safe-area-inset-bottom);}
   @media (max-width:767px){
     table.tbl{font-size:12px;}
     table.tbl td, table.tbl th{padding:8px 10px;}
@@ -61,5 +75,16 @@
 <script src="config.js"></script>
 <script src="logo.js"></script>
 <script src="app.js"></script>
+<script>
+  // Registro del service worker (necesario para que la app sea instalable).
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {
+        // Si falla (ej. abierto como file:// en vez de https://), la app sigue
+        // funcionando normal, solo sin la opción de instalar.
+      });
+    });
+  }
+</script>
 </body>
 </html>
