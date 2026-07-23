@@ -286,7 +286,7 @@ function vistaLogin(){
         <h1 class="text-xl font-display font-bold">Gestión de Cuotas</h1>
       </div>
       <p class="text-sm text-gray-500 mb-6">Control y cobro de cuotas escolares</p>
-      <form id="loginForm">
+      <form id="loginForm" onsubmit="manejarLogin(event)">
         <label class="lbl">Email</label>
         <input id="lu" type="text" class="mb-3" placeholder="tu@email.com" autofocus>
         <label class="lbl">Contraseña</label>
@@ -295,16 +295,26 @@ function vistaLogin(){
         <button type="submit" id="loginBtn" class="btn-primary w-full mt-4 py-2.5 rounded-lg font-semibold text-sm">Ingresar</button>
       </form>
     </div>
-  </div>
-  <script>
-    document.getElementById('loginForm').addEventListener('submit', async function(e){
-      e.preventDefault();
-      const btn = document.getElementById('loginBtn');
-      btn.disabled = true; btn.textContent = 'Ingresando...';
-      const ok = await login(document.getElementById('lu').value.trim(), document.getElementById('lc').value);
-      if(!ok){ document.getElementById('lerr').classList.remove('hidden'); btn.disabled=false; btn.textContent='Ingresar'; }
-    });
-  </script>`;
+  </div>`;
+}
+// Los atributos inline (onsubmit="...") sí se ejecutan cuando el HTML se inserta
+// via innerHTML; un <script> embebido en ese mismo HTML, en cambio, NO se ejecuta
+// nunca (los navegadores lo ignoran por seguridad). Por eso el login se maneja acá.
+async function manejarLogin(e){
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  const lerr = document.getElementById('lerr');
+  btn.disabled = true; btn.textContent = 'Ingresando...';
+  lerr.classList.add('hidden');
+  const email = document.getElementById('lu').value.trim();
+  const clave = document.getElementById('lc').value;
+  const ok = await login(email, clave);
+  if(ok){
+    render();
+  }else{
+    lerr.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = 'Ingresar';
+  }
 }
 
 function vistaPrincipal(){
