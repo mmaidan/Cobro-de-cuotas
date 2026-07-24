@@ -6,6 +6,8 @@ const db = firebase.firestore();
 /* ======================= ESTADO EN MEMORIA ======================= */
 let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
 let SESSION = null; // { id, email, rol, nombre, access_token, loginTime }
+// Cuenta del dueño del sistema: no se muestra en la lista de usuarios ni se puede borrar desde ahí.
+const EMAIL_PROTEGIDO = 'memmarcos1987@gmail.com';
 
 /* ======================= SEGURIDAD DE SESIÓN ======================= */
 // Por ser un sistema de cobro de dinero, la sesión se cierra sola por
@@ -1130,7 +1132,7 @@ function vistaConfig(){
       <h3 class="font-display font-bold mb-4">Usuarios</h3>
       <table class="tbl w-full text-sm mb-4">
         <thead><tr><th class="text-left">Email</th><th class="text-left">Nombre</th><th class="text-left">Rol</th><th></th></tr></thead>
-        <tbody>${(STATE.perfiles||[]).map(u=>`
+        <tbody>${(STATE.perfiles||[]).filter(u=>u.email!==EMAIL_PROTEGIDO).map(u=>`
           <tr><td>${u.email}</td><td>${u.nombre}</td><td>${u.rol==='super'?'Superusuario':'Cobrador/a'}</td>
           <td class="text-right">${u.id!==SESSION.id?`<button onclick="eliminarUsuario('${u.id}')" class="text-[#a8493a] text-xs">Eliminar</button>`:''}</td></tr>
         `).join('')}</tbody>
@@ -1216,6 +1218,8 @@ async function agregarUsuario(){
 }
 async function eliminarUsuario(id){
   if(id === SESSION.id){ UI.alertaMsg='No podés eliminar tu propio usuario.'; render(); return; }
+  const perfil = (STATE.perfiles||[]).find(p=>p.id===id);
+  if(perfil && perfil.email===EMAIL_PROTEGIDO){ UI.alertaMsg='Esa cuenta no se puede eliminar desde acá.'; render(); return; }
   try{
     await db.collection('usuarios').doc(id).delete();
     STATE.perfiles = STATE.perfiles.filter(p=>p.id!==id);
