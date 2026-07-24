@@ -927,14 +927,24 @@ function statsMensuales(anio){
   });
   return meses;
 }
+// Trimestres del ciclo lectivo argentino (no son iguales a los trimestres del
+// calendario civil): 1er Trim. marzo-mayo, 2do Trim. junio-agosto (con el receso
+// invernal en el medio), 3er Trim. septiembre-diciembre.
+const TRIMESTRES_CICLO_LECTIVO = [
+  { nombre: '1er Trimestre', meses: [3,4,5], detalle: 'Marzo - Mayo' },
+  { nombre: '2do Trimestre', meses: [6,7,8], detalle: 'Junio - Agosto' },
+  { nombre: '3er Trimestre', meses: [9,10,11,12], detalle: 'Septiembre - Diciembre' },
+];
 function statsTrimestrales(anio){
-  const mensual = statsMensuales(anio);
-  const trims = [0,1,2,3].map(t=>({trimestre:t+1, efectivo:0, transferencia:0, total:0}));
-  mensual.forEach((m,i)=>{
-    const t = Math.floor(i/3);
-    trims[t].efectivo += m.efectivo; trims[t].transferencia += m.transferencia; trims[t].total += m.total;
+  const mensual = statsMensuales(anio); // índice 0 = enero ... 11 = diciembre
+  return TRIMESTRES_CICLO_LECTIVO.map(t=>{
+    const acumulado = { nombre:t.nombre, detalle:t.detalle, efectivo:0, transferencia:0, total:0 };
+    t.meses.forEach(mes=>{
+      const m = mensual[mes-1];
+      acumulado.efectivo += m.efectivo; acumulado.transferencia += m.transferencia; acumulado.total += m.total;
+    });
+    return acumulado;
   });
-  return trims;
 }
 function statsAnuales(){
   const porAnio = {};
@@ -1028,8 +1038,8 @@ function vistaEstadisticas(){
     </div>
 
     <div class="card p-5 mb-6">
-      <h3 class="font-display font-bold mb-4">Trimestral</h3>
-      ${trimestral.map(t=> barraComparativa('T'+t.trimestre, t, maxTrimestral)).join('')}
+      <h3 class="font-display font-bold mb-4">Trimestral <span class="text-xs text-gray-400 font-normal">(ciclo lectivo marzo–diciembre)</span></h3>
+      ${trimestral.map(t=> barraComparativa(`${t.nombre} <span class="text-gray-400 font-normal">(${t.detalle})</span>`, t, maxTrimestral)).join('')}
     </div>
 
     <div class="card p-5">
