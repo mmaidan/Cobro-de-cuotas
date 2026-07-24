@@ -24,7 +24,12 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Falta la variable de entorno FIREBASE_SERVICE_ACCOUNT en el servidor' });
   }
 
-  const app = getAdminApp();
+  let app;
+  try {
+    app = getAdminApp();
+  } catch (e) {
+    return res.status(500).json({ error: 'FIREBASE_SERVICE_ACCOUNT no es un JSON válido: ' + e.message });
+  }
   const auth = app.auth();
   const db = app.firestore();
 
