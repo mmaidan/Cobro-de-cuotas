@@ -1145,6 +1145,12 @@ function vistaConfig(){
       <button onclick="guardarSeguridad()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold">Guardar</button>
     </div>
     <div class="card p-5 mt-6">
+      <h3 class="font-display font-bold mb-4 flex items-center gap-2">${icon('download','w-4 h-4 text-gray-400')} Respaldo</h3>
+      <p class="text-sm text-gray-500 mb-3">Descarga un archivo con todos los alumnos, pagos, configuración y usuarios tal como están en este momento.</p>
+      <button onclick="descargarRespaldo()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">${icon('download','w-4 h-4')} Descargar respaldo ahora</button>
+      <p class="text-xs text-gray-400 mt-3">Guardalo en Google Drive, en tu PC, o donde te resulte más cómodo. Como no es automático, conviene hacerlo con alguna frecuencia (por ejemplo, una vez por semana) para no perder registros importantes.</p>
+    </div>
+    <div class="card p-5 mt-6">
       <h3 class="font-display font-bold mb-4">Usuarios</h3>
       <table class="tbl w-full text-sm mb-4">
         <thead><tr><th class="text-left">Usuario</th><th class="text-left">Nombre</th><th class="text-left">Rol</th><th></th></tr></thead>
@@ -1176,6 +1182,31 @@ async function guardarSeguridad(){
     STATE.config.sesionMaximaHoras = sesionMaximaHoras;
     UI.alertaMsg = 'Configuración de seguridad guardada.'; UI.alertaTipo='ok';
   }catch(e){ UI.alertaMsg = 'Error: '+e.message; UI.alertaTipo='error'; }
+  render();
+}
+function descargarRespaldo(){
+  try{
+    const respaldo = {
+      generado: new Date().toISOString(),
+      institucion: 'Instituto San José - Quines, San Luis',
+      config: STATE.config,
+      alumnos: STATE.alumnos,
+      pagos: STATE.pagos,
+      usuarios: (STATE.perfiles||[]).map(u=>({ id:u.id, usuario:u.usuario||null, email:u.email, nombre:u.nombre, rol:u.rol }))
+    };
+    const blob = new Blob([JSON.stringify(respaldo, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `respaldo-cuotas-${nuevaFechaISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    UI.alertaMsg = 'Respaldo descargado. Guardalo en Google Drive, tu PC o donde prefieras.'; UI.alertaTipo='ok';
+  }catch(e){
+    UI.alertaMsg = 'Error al generar el respaldo: '+e.message; UI.alertaTipo='error';
+  }
   render();
 }
 async function guardarCuota(){
