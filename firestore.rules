@@ -36,5 +36,12 @@ service cloud.firestore {
       allow create, update: if estaAutenticado();
       allow delete: if esSuper();
     }
+
+    // Respaldos automáticos semanales: los escribe únicamente la función serverless
+    // (usa el Admin SDK, que ignora estas reglas). Acá solo controlamos la lectura.
+    match /respaldos/{fecha} {
+      allow read: if esSuper();
+      allow write: if false;
+    }
   }
 }

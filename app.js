@@ -180,11 +180,19 @@ async function cargarDatos(){
   STATE.config = mapConfigDesdeDB(cfgSnap.exists ? cfgSnap.data() : null);
   STATE.alumnos = alumnosSnap.docs.map(d=>mapAlumnoDesdeDB(d.id, d.data()));
   STATE.pagos = pagosSnap.docs.map(d=>mapPagoDesdeDB(d.id, d.data()));
-  if(SESSION.rol==='super'){ await cargarPerfiles(); }
+  if(SESSION.rol==='super'){ await cargarPerfiles(); await cargarRespaldosAutomaticos(); }
 }
 async function cargarPerfiles(){
   const snap = await db.collection('usuarios').orderBy('nombre').get();
   STATE.perfiles = snap.docs.map(d=>({id:d.id, ...d.data()}));
+}
+async function cargarRespaldosAutomaticos(){
+  try{
+    const snap = await db.collection('respaldos').orderBy('generado','desc').get();
+    STATE.respaldosAutomaticos = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  }catch(e){
+    STATE.respaldosAutomaticos = [];
+  }
 }
 async function login(usuarioOEmail, clave){
   try{
@@ -1146,9 +1154,29 @@ function vistaConfig(){
     </div>
     <div class="card p-5 mt-6">
       <h3 class="font-display font-bold mb-4 flex items-center gap-2">${icon('download','w-4 h-4 text-gray-400')} Respaldo</h3>
-      <p class="text-sm text-gray-500 mb-3">Descarga un archivo con todos los alumnos, pagos, configuración y usuarios tal como están en este momento.</p>
+      <p class="text-sm text-gray-500 mb-3">Además del automático semanal, podés descargar uno al toque cuando quieras.</p>
       <button onclick="descargarRespaldo()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2">${icon('download','w-4 h-4')} Descargar respaldo ahora</button>
-      <p class="text-xs text-gray-400 mt-3">Guardalo en Google Drive, en tu PC, o donde te resulte más cómodo. Como no es automático, conviene hacerlo con alguna frecuencia (por ejemplo, una vez por semana) para no perder registros importantes.</p>
+      <p class="text-xs text-gray-400 mt-3 mb-5">Guardalo en Google Drive, en tu PC, o donde te resulte más cómodo.</p>
+
+      <div class="border-t pt-4" style="border-color:var(--border)">
+        <h4 class="font-semibold text-sm mb-2">Respaldos automáticos</h4>
+        ${(STATE.respaldosAutomaticos||[]).length===0 ? `<p class="text-xs text-gray-400 mb-4">Todavía no hay ninguno. Corre solo, una vez por semana.</p>` : `
+        <div class="divide-y mb-4" style="border-color:var(--border)">
+          ${(STATE.respaldosAutomaticos||[]).map(r=>`
+            <div class="flex items-center justify-between py-2 text-sm">
+              <span>${fmtFecha(r.id)} <span class="text-gray-400 text-xs">· ${(r.alumnos||[]).length} alumnos, ${(r.pagos||[]).length} pagos</span></span>
+              <button onclick="restaurarDesdeAutomatico('${r.id}')" class="text-xs" style="color:var(--accent)">Restaurar este</button>
+            </div>
+          `).join('')}
+        </div>`}
+      </div>
+
+      <div class="border-t pt-4" style="border-color:var(--border)">
+        <h4 class="font-semibold text-sm mb-2">Restaurar desde un archivo</h4>
+        <p class="text-xs text-gray-400 mb-2">Subí un archivo que hayas descargado antes con "Descargar respaldo ahora".</p>
+        <input type="file" accept=".json" onchange="restaurarDesdeArchivo(this)">
+        <p class="text-xs mt-2" style="color:var(--danger)">⚠ Restaurar reemplaza TODOS los alumnos y pagos actuales por los del respaldo. No se puede deshacer.</p>
+      </div>
     </div>
     <div class="card p-5 mt-6">
       <h3 class="font-display font-bold mb-4">Usuarios</h3>
@@ -1208,6 +1236,74 @@ function descargarRespaldo(){
     UI.alertaMsg = 'Error al generar el respaldo: '+e.message; UI.alertaTipo='error';
   }
   render();
+}
+
+/* ---------- Restaurar datos desde un respaldo ---------- */
+// Reemplaza por completo una colección: borra todos los documentos actuales e
+// inserta los del respaldo, conservando el ID original de cada uno (importante
+// para que los pagos sigan apuntando al alumno correcto).
+async function reemplazarColeccion(nombreColeccion, nuevosDocs){
+  const actuales = await db.collection(nombreColeccion).get();
+  const idsABorrar = actuales.docs.map(d=>d.id);
+  for(let i=0;i<idsABorrar.length;i+=400){
+    const batch = db.batch();
+    idsABorrar.slice(i,i+400).forEach(id=> batch.delete(db.collection(nombreColeccion).doc(id)));
+    await batch.commit();
+  }
+  for(let i=0;i<nuevosDocs.length;i+=400){
+    const batch = db.batch();
+    nuevosDocs.slice(i,i+400).forEach(doc=>{
+      const { id, ...datos } = doc;
+      batch.set(db.collection(nombreColeccion).doc(id), datos);
+    });
+    await batch.commit();
+  }
+}
+async function ejecutarRestauracion(datos){
+  UI.alertaMsg = 'Restaurando datos, no cierres esta pantalla...'; UI.alertaTipo='ok'; render();
+  try{
+    await reemplazarColeccion('alumnos', datos.alumnos||[]);
+    await reemplazarColeccion('pagos', datos.pagos||[]);
+    if(datos.config){
+      await db.collection('configuracion').doc('general').set(datos.config);
+    }
+    await cargarDatos();
+    UI.alertaMsg = `Datos restaurados: ${(datos.alumnos||[]).length} alumnos, ${(datos.pagos||[]).length} pagos.`; UI.alertaTipo='ok';
+  }catch(e){
+    UI.alertaMsg = 'Error al restaurar: '+e.message; UI.alertaTipo='error';
+  }
+  render();
+}
+function confirmarYRestaurar(datos, origen){
+  if(!datos || !Array.isArray(datos.alumnos) || !Array.isArray(datos.pagos)){
+    UI.alertaMsg = 'Ese archivo no parece un respaldo válido.'; UI.alertaTipo='error'; render(); return;
+  }
+  const ok = confirm(
+    `¿Restaurar datos desde ${origen}?\n\n` +
+    `Esto va a REEMPLAZAR TODOS los alumnos y pagos actuales por los del respaldo:\n` +
+    `${datos.alumnos.length} alumnos, ${datos.pagos.length} pagos.\n\n` +
+    `Los usuarios (accesos) NO se tocan. Esta acción no se puede deshacer.\n\n¿Continuar?`
+  );
+  if(!ok) return;
+  ejecutarRestauracion(datos);
+}
+function restaurarDesdeArchivo(inputEl){
+  const file = inputEl.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    let datos;
+    try{ datos = JSON.parse(e.target.result); }
+    catch(err){ UI.alertaMsg = 'Ese archivo no es un JSON válido.'; UI.alertaTipo='error'; render(); return; }
+    confirmarYRestaurar(datos, `el archivo "${file.name}"`);
+  };
+  reader.readAsText(file);
+  inputEl.value = '';
+}
+function restaurarDesdeAutomatico(id){
+  const respaldo = (STATE.respaldosAutomaticos||[]).find(r=>r.id===id);
+  if(!respaldo){ UI.alertaMsg='No se encontró ese respaldo.'; UI.alertaTipo='error'; render(); return; }
+  confirmarYRestaurar(respaldo, `el respaldo automático del ${fmtFecha(id)}`);
 }
 async function guardarCuota(){
   const montoCuota = Number(document.getElementById('cfgMonto').value)||0;
