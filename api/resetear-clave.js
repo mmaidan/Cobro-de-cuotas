@@ -1,6 +1,6 @@
 // Función serverless (corre en Vercel, nunca en el navegador).
-// Usa la cuenta de servicio de Firebase, guardada como variable de entorno secreta,
-// para crear usuarios de Authentication y su perfil en Firestore.
+// Le permite al superusuario cambiarle la contraseña a otro usuario sin necesitar
+// su email (los usuarios se manejan por "usuario", no por correo).
 import admin from 'firebase-admin';
 
 function getAdminApp() {
@@ -39,32 +39,21 @@ export default async function handler(req, res) {
   // 2) Verificar que ese usuario es superusuario
   const perfilSnap = await db.collection('usuarios').doc(decoded.uid).get();
   if (!perfilSnap.exists || perfilSnap.data().rol !== 'super') {
-    return res.status(403).json({ error: 'Solo el superusuario puede crear usuarios' });
+    return res.status(403).json({ error: 'Solo el superusuario puede cambiar contraseñas' });
   }
 
-  // 3) Crear el usuario nuevo
-  const { email, usuario, password, nombre, rol } = req.body || {};
-  if (!email || !password || !rol) {
-    return res.status(400).json({ error: 'Faltan datos (email, password o rol)' });
+  // 3) Cambiar la contraseña del usuario indicado
+  const { uid, password } = req.body || {};
+  if (!uid || !password) {
+    return res.status(400).json({ error: 'Faltan datos (uid o password)' });
   }
-  if (!['super', 'cobrador'].includes(rol)) {
-    return res.status(400).json({ error: 'Rol inválido' });
-  }
-
-  let nuevoUsuario;
-  try {
-    nuevoUsuario = await auth.createUser({ email, password });
-  } catch (e) {
-    return res.status(400).json({ error: e.message });
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'La contraseña tiene que tener al menos 6 caracteres' });
   }
 
   try {
-    await db.collection('usuarios').doc(nuevoUsuario.uid).set({
-      email, usuario: usuario || null, nombre: nombre || usuario || email, rol
-    });
+    await auth.updateUser(uid, { password });
   } catch (e) {
-    // si falla la creación del perfil, deshacemos el usuario de Auth para no dejarlo huérfano
-    await auth.deleteUser(nuevoUsuario.uid);
     return res.status(400).json({ error: e.message });
   }
 
