@@ -8,6 +8,17 @@ let STATE = { config: null, alumnos: [], pagos: [], perfiles: [] };
 let SESSION = null; // { id, email, rol, nombre, access_token, loginTime }
 // Cuenta del dueño del sistema: no se muestra en la lista de usuarios ni se puede borrar desde ahí.
 const EMAIL_PROTEGIDO = 'memmarcos1987@gmail.com';
+// Firebase Authentication necesita internamente un "email" para identificar la cuenta,
+// pero de cara al usuario evitamos pedirlo: los usuarios nuevos se crean con un simple
+// "usuario" (sin @), y acá se lo convierte en un email interno que nadie ve ni recibe correos.
+const DOMINIO_INTERNO = 'cuotas-isj.local';
+function esFormatoEmail(texto){ return texto.includes('@'); }
+// Si lo que se tipeó ya es un email (caso de cuentas viejas, como la del dueño del sistema)
+// se usa tal cual. Si es un usuario simple, se arma el email interno.
+function resolverEmailDeLogin(entrada){
+  const valor = entrada.trim().toLowerCase();
+  return esFormatoEmail(valor) ? valor : valor.replace(/\s+/g,'') + '@' + DOMINIO_INTERNO;
+}
 
 /* ======================= SEGURIDAD DE SESIÓN ======================= */
 // Por ser un sistema de cobro de dinero, la sesión se cierra sola por
@@ -39,7 +50,7 @@ setInterval(async ()=>{
 }, 30000);
 
 let TAB = 'dashboard';
-let UI = { alertaMsg:null, alertaLogin:null, alertaLoginOk:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', busquedaAlumnos:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null, cursosAbiertos:{}, aniosAbiertos:{}, dashboardFiltro:null };
+let UI = { alertaMsg:null, alertaTipo:'ok', alertaLogin:null, alertaLoginOk:null, importPreview:null, importEncoding:'utf-8', cargando:true, busqueda:'', busquedaAlumnos:'', _modalPago:null, sidebarAbierto:false, soloDeudores:true, cajaPreset:'hoy', cajaDesde:nuevaFechaISO(), cajaHasta:nuevaFechaISO(), statsAnio:null, cursosAbiertos:{}, aniosAbiertos:{}, dashboardFiltro:null };
 
 /* ======================= UTILIDADES ======================= */
 function fmtMoney(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:0}); }
@@ -175,24 +186,29 @@ async function cargarPerfiles(){
   const snap = await db.collection('usuarios').orderBy('nombre').get();
   STATE.perfiles = snap.docs.map(d=>({id:d.id, ...d.data()}));
 }
-async function login(email, clave){
+async function login(usuarioOEmail, clave){
   try{
+    const email = resolverEmailDeLogin(usuarioOEmail);
     const cred = await auth.signInWithEmailAndPassword(email, clave);
     await establecerSesion(cred.user);
     return !!SESSION;
   }catch(e){ return false; }
 }
 async function recuperarContrasena(){
-  const email = (document.getElementById('lu').value||'').trim();
+  const valor = (document.getElementById('lu').value||'').trim();
   UI.alertaLoginOk = null;
-  if(!email){
-    UI.alertaLogin = 'Escribí tu email en el campo de arriba y volvé a tocar "¿Olvidaste tu contraseña?".';
+  if(!valor){
+    UI.alertaLogin = 'Escribí tu usuario en el campo de arriba y volvé a tocar "¿Olvidaste tu contraseña?".';
+    render(); return;
+  }
+  if(!esFormatoEmail(valor)){
+    UI.alertaLogin = 'Los usuarios sin email no pueden recuperar la contraseña solos: pedile al superusuario que te la cambie desde Configuración → Usuarios.';
     render(); return;
   }
   try{
-    await auth.sendPasswordResetEmail(email);
+    await auth.sendPasswordResetEmail(valor);
     UI.alertaLogin = null;
-    UI.alertaLoginOk = `Te enviamos un email a ${email} con un link para crear una nueva contraseña. Revisá también la carpeta de spam.`;
+    UI.alertaLoginOk = `Te enviamos un email a ${valor} con un link para crear una nueva contraseña. Revisá también la carpeta de spam.`;
   }catch(e){
     UI.alertaLoginOk = null;
     UI.alertaLogin = e.code==='auth/user-not-found'
@@ -303,9 +319,9 @@ async function eliminarAlumno(id){
     await batch.commit();
     STATE.alumnos = STATE.alumnos.filter(a=>a.id!==id);
     STATE.pagos = STATE.pagos.filter(p=>p.alumnoId!==id);
-    UI.alertaMsg = 'Alumno eliminado.';
+    UI.alertaMsg = 'Alumno eliminado.'; UI.alertaTipo='ok';
   }catch(e){
-    UI.alertaMsg = 'Error al eliminar: '+e.message;
+    UI.alertaMsg = 'Error al eliminar: '+e.message; UI.alertaTipo='error';
   }
   render();
 }
@@ -313,7 +329,7 @@ async function confirmarBorrarAlumnos(){
   const cantidad = STATE.alumnos.length;
   const ok = confirm(`Esto borra los ${cantidad} alumnos cargados y todos los pagos registrados. No se puede deshacer. ¿Continuar?`);
   if(!ok) return;
-  UI.alertaMsg = 'Borrando...'; render();
+  UI.alertaMsg = 'Borrando...'; UI.alertaTipo='ok'; render();
   try{
     // Borramos alumnos y sus pagos asociados, en lotes de 400 (límite de Firestore).
     const idsAlumnos = STATE.alumnos.map(a=>a.id);
@@ -329,9 +345,9 @@ async function confirmarBorrarAlumnos(){
     }
     STATE.alumnos = [];
     STATE.pagos = [];
-    UI.alertaMsg = `Se borraron ${cantidad} alumnos. Ya podés reimportar el CSV.`;
+    UI.alertaMsg = `Se borraron ${cantidad} alumnos. Ya podés reimportar el CSV.`; UI.alertaTipo='ok';
   }catch(e){
-    UI.alertaMsg = 'Error al borrar: '+e.message;
+    UI.alertaMsg = 'Error al borrar: '+e.message; UI.alertaTipo='error';
   }
   render();
 }
@@ -350,9 +366,9 @@ async function confirmarImportacion(){
     const creados = await insertarEnLotes('alumnos', nuevos);
     STATE.alumnos = STATE.alumnos.concat(creados).sort((a,b)=> (a.apellidos||'').localeCompare(b.apellidos||''));
     UI.importPreview = null;
-    UI.alertaMsg = `Se importaron ${creados.length} alumnos (${omitidos} omitidos por DNI duplicado).`;
+    UI.alertaMsg = `Se importaron ${creados.length} alumnos (${omitidos} omitidos por DNI duplicado).`; UI.alertaTipo='ok';
   }catch(e){
-    UI.alertaMsg = 'Error al importar: '+e.message;
+    UI.alertaMsg = 'Error al importar: '+e.message; UI.alertaTipo='error';
   }
   render();
 }
@@ -376,9 +392,9 @@ async function registrarPago({alumnoId, periodo, metodo, montoPagado}){
   try{
     await db.collection('pagos').doc(docId).set(registro);
     STATE.pagos = STATE.pagos.filter(p=>p.id!==docId).concat([{ id: docId, ...registro }]);
-    UI.alertaMsg = `Cobro registrado correctamente. <button onclick="generarComprobantePDF('${docId}')" class="underline font-semibold ml-1">Imprimir comprobante</button>`;
+    UI.alertaMsg = `Cobro registrado correctamente. <button onclick="generarComprobantePDF('${docId}')" class="underline font-semibold ml-1">Imprimir comprobante</button>`; UI.alertaTipo='ok';
   }catch(e){
-    UI.alertaMsg = 'Error al registrar el cobro: '+e.message;
+    UI.alertaMsg = 'Error al registrar el cobro: '+e.message; UI.alertaTipo='error';
   }
   render();
 }
@@ -386,7 +402,7 @@ async function anularPago(pagoId){
   try{
     await db.collection('pagos').doc(pagoId).delete();
     STATE.pagos = STATE.pagos.filter(p=>p.id!==pagoId);
-  }catch(e){ UI.alertaMsg = 'Error: '+e.message; }
+  }catch(e){ UI.alertaMsg = 'Error: '+e.message; UI.alertaTipo='error'; }
   render();
 }
 
@@ -403,7 +419,7 @@ function encabezadoPDF(doc, titulo){
 }
 function generarComprobantePDF(pagoId){
   const p = STATE.pagos.find(x=>x.id===pagoId);
-  if(!p){ UI.alertaMsg = 'No se encontró el pago.'; render(); return; }
+  if(!p){ UI.alertaMsg = 'No se encontró el pago.'; UI.alertaTipo='error'; render(); return; }
   const a = STATE.alumnos.find(x=>x.id===p.alumnoId);
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
@@ -433,7 +449,7 @@ function generarComprobantePDF(pagoId){
 function exportarDeudoresPDF(){
   const deudores = STATE.alumnos.filter(a=>a.activo).map(a=>({a, r:resumenAlumno(a.id)})).filter(x=>x.r.cantidadPendiente>0)
     .sort((x,y)=>y.r.maxAtraso-x.r.maxAtraso);
-  if(deudores.length===0){ UI.alertaMsg='No hay deudores para exportar.'; render(); return; }
+  if(deudores.length===0){ UI.alertaMsg='No hay deudores para exportar.'; UI.alertaTipo='error'; render(); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   encabezadoPDF(doc, 'Listado de alumnos con cuotas pendientes');
@@ -492,8 +508,8 @@ function vistaLogin(){
         ${UI.alertaLogin ? `<div class="badge-danger text-xs rounded-lg p-3 mb-4 anim-slide-down">${UI.alertaLogin}</div>` : ''}
         ${UI.alertaLoginOk ? `<div class="badge-ok text-xs rounded-lg p-3 mb-4 anim-slide-down">${UI.alertaLoginOk}</div>` : ''}
         <form id="loginForm" onsubmit="manejarLogin(event)">
-          <label class="lbl">Email</label>
-          <input id="lu" type="text" class="mb-3" placeholder="tu@email.com" autofocus>
+          <label class="lbl">Usuario</label>
+          <input id="lu" type="text" class="mb-3" placeholder="tu usuario" autocapitalize="none" autofocus>
           <label class="lbl">Contraseña</label>
           <input id="lc" type="password" class="mb-1" placeholder="••••••••">
           <div class="text-right mb-1">
@@ -566,7 +582,7 @@ function vistaPrincipal(){
         <span class="font-display font-bold text-sm">Gestión de Cuotas</span>
       </header>
       <main class="flex-1 overflow-y-auto p-4 md:p-8">
-        ${UI.alertaMsg ? `<div class="card px-4 py-3 mb-5 flex items-center justify-between text-sm anim-slide-down" style="border-color:#cfe0d4; background:#f0f6f0; color:var(--ok)"><span>${UI.alertaMsg}</span><button onclick="UI.alertaMsg=null; render();" style="color:var(--ok)">${icon('x','w-4 h-4')}</button></div>` : ''}
+        ${UI.alertaMsg ? `<div class="card px-4 py-3 mb-5 flex items-center justify-between text-sm anim-slide-down" style="${UI.alertaTipo==='error' ? 'border-color:#e8cec8; background:#fbeeea; color:var(--danger)' : 'border-color:#cfe0d4; background:#f0f6f0; color:var(--ok)'}"><span>${UI.alertaMsg}</span><button onclick="UI.alertaMsg=null; render();" style="color:${UI.alertaTipo==='error'?'var(--danger)':'var(--ok)'}">${icon('x','w-4 h-4')}</button></div>` : ''}
         <div class="anim-fade-slide" data-tab="${TAB}">
         ${ TAB==='dashboard' ? vistaDashboard() :
            TAB==='alumnos' ? vistaAlumnos() :
@@ -1131,24 +1147,23 @@ function vistaConfig(){
     <div class="card p-5 mt-6">
       <h3 class="font-display font-bold mb-4">Usuarios</h3>
       <table class="tbl w-full text-sm mb-4">
-        <thead><tr><th class="text-left">Email</th><th class="text-left">Nombre</th><th class="text-left">Rol</th><th></th></tr></thead>
+        <thead><tr><th class="text-left">Usuario</th><th class="text-left">Nombre</th><th class="text-left">Rol</th><th></th></tr></thead>
         <tbody>${(STATE.perfiles||[]).filter(u=>u.email!==EMAIL_PROTEGIDO).map(u=>`
-          <tr><td>${u.email}</td><td>${u.nombre}</td><td>${u.rol==='super'?'Superusuario':'Cobrador/a'}</td>
-          <td class="text-right">${u.id!==SESSION.id?`<button onclick="eliminarUsuario('${u.id}')" class="text-[#a8493a] text-xs">Eliminar</button>`:''}</td></tr>
+          <tr><td>${u.usuario||u.email}</td><td>${u.nombre}</td><td>${u.rol==='super'?'Superusuario':'Cobrador/a'}</td>
+          <td class="text-right whitespace-nowrap">
+            <button onclick="resetearClaveUsuario('${u.id}','${(u.usuario||u.email||'').replace(/'/g,"\\'")}')" class="text-xs mr-3" style="color:var(--accent)">Cambiar contraseña</button>
+            ${u.id!==SESSION.id?`<button onclick="eliminarUsuario('${u.id}')" class="text-[#a8493a] text-xs">Eliminar</button>`:''}
+          </td></tr>
         `).join('')}</tbody>
       </table>
       <div class="grid sm:grid-cols-4 gap-2">
-        <input type="text" id="nuUsuario" placeholder="email">
+        <input type="text" id="nuUsuario" placeholder="usuario (ej: jperez)" autocapitalize="none">
         <input type="text" id="nuNombre" placeholder="nombre completo">
-        <input type="password" id="nuClave" placeholder="contraseña temporal">
+        <input type="password" id="nuClave" placeholder="contraseña">
         <select id="nuRol"><option value="cobrador">Cobrador/a</option><option value="super">Superusuario</option></select>
       </div>
-      <label class="flex items-center gap-2 text-xs text-gray-500 select-none mt-3">
-        <input type="checkbox" id="nuEnviarReset" checked>
-        Enviarle un email para que configure su propia contraseña (recomendado)
-      </label>
       <button onclick="agregarUsuario()" class="btn-primary px-4 py-2 rounded-lg text-sm font-semibold mt-3">Agregar usuario</button>
-      <p class="text-xs text-gray-400 mt-2">Si tildás la casilla, la contraseña temporal que cargues arriba no hace falta compartirla: el usuario va a poder elegir la suya desde el email que le llega. Eliminar un usuario acá quita su acceso a la app; para borrarlo por completo de Authentication, hacelo desde la consola de Firebase.</p>
+      <p class="text-xs text-gray-400 mt-2">No hace falta email: elegís un usuario simple (sin espacios ni "@") y una contraseña, y esa persona ya puede entrar con eso. Si alguien se olvida la contraseña, usá "Cambiar contraseña" en su fila. Eliminar un usuario acá quita su acceso a la app; para borrarlo por completo de Authentication, hacelo desde la consola de Firebase.</p>
     </div>
   `;
 }
@@ -1159,8 +1174,8 @@ async function guardarSeguridad(){
     await db.collection('configuracion').doc('general').set({ sesionInactividadMin, sesionMaximaHoras }, {merge:true});
     STATE.config.sesionInactividadMin = sesionInactividadMin;
     STATE.config.sesionMaximaHoras = sesionMaximaHoras;
-    UI.alertaMsg = 'Configuración de seguridad guardada.';
-  }catch(e){ UI.alertaMsg = 'Error: '+e.message; }
+    UI.alertaMsg = 'Configuración de seguridad guardada.'; UI.alertaTipo='ok';
+  }catch(e){ UI.alertaMsg = 'Error: '+e.message; UI.alertaTipo='error'; }
   render();
 }
 async function guardarCuota(){
@@ -1170,8 +1185,8 @@ async function guardarCuota(){
   try{
     await db.collection('configuracion').doc('general').set({ montoCuota, diaVencimiento, periodoInicio }, {merge:true});
     STATE.config.montoCuota = montoCuota; STATE.config.diaVencimiento = diaVencimiento; STATE.config.periodoInicio = periodoInicio;
-    UI.alertaMsg='Configuración de cuota guardada.';
-  }catch(e){ UI.alertaMsg='Error: '+e.message; }
+    UI.alertaMsg='Configuración de cuota guardada.'; UI.alertaTipo='ok';
+  }catch(e){ UI.alertaMsg='Error: '+e.message; UI.alertaTipo='error'; }
   render();
 }
 async function guardarMora(){
@@ -1181,49 +1196,79 @@ async function guardarMora(){
   try{
     await db.collection('configuracion').doc('general').set({ mora: { porcentajePor10Dias, topeBloques, porcentajeMensualExtra } }, {merge:true});
     STATE.config.mora = { porcentajePor10Dias, topeBloques, porcentajeMensualExtra };
-    UI.alertaMsg='Regla de mora actualizada.';
-  }catch(e){ UI.alertaMsg='Error: '+e.message; }
+    UI.alertaMsg='Regla de mora actualizada.'; UI.alertaTipo='ok';
+  }catch(e){ UI.alertaMsg='Error: '+e.message; UI.alertaTipo='error'; }
   render();
 }
 async function agregarUsuario(){
-  const email=document.getElementById('nuUsuario').value.trim();
+  const usuarioInput=document.getElementById('nuUsuario').value.trim();
   const nombre=document.getElementById('nuNombre').value.trim();
   const clave=document.getElementById('nuClave').value;
   const rol=document.getElementById('nuRol').value;
-  const enviarReset=document.getElementById('nuEnviarReset').checked;
-  if(!email||!clave) return;
+  if(!usuarioInput||!clave) return;
+  if(/[@\s]/.test(usuarioInput)){
+    UI.alertaMsg = 'El usuario no puede tener espacios ni "@". Elegí algo simple, como "jperez".';
+    UI.alertaTipo='error'; render(); return;
+  }
+  if(clave.length<6){
+    UI.alertaMsg = 'La contraseña tiene que tener al menos 6 caracteres.';
+    UI.alertaTipo='error'; render(); return;
+  }
+  const usuario = usuarioInput.toLowerCase();
+  const email = usuario + '@' + DOMINIO_INTERNO;
   try{
     const resp = await fetch('/api/crear-usuario', {
       method:'POST',
       headers:{'Content-Type':'application/json', 'Authorization': 'Bearer '+SESSION.access_token},
-      body: JSON.stringify({email, password:clave, nombre, rol})
+      body: JSON.stringify({email, usuario, password:clave, nombre, rol})
     });
-    const data = await resp.json();
+    let data;
+    try{
+      data = await resp.json();
+    }catch(parseErr){
+      throw new Error(`La función del servidor falló (código ${resp.status}) y no devolvió una respuesta válida. Revisá en Vercel: Deployments → el último deploy → Runtime Logs, ahí debería verse el motivo exacto.`);
+    }
     if(!resp.ok) throw new Error(data.error||'No se pudo crear el usuario');
     await cargarPerfiles();
-    if(enviarReset){
-      try{
-        await auth.sendPasswordResetEmail(email);
-        UI.alertaMsg = `Usuario creado. Le enviamos un email a ${email} para que configure su propia contraseña.`;
-      }catch(e2){
-        UI.alertaMsg = 'Usuario creado, pero no se pudo enviar el email de configuración: '+e2.message;
-      }
-    }else{
-      UI.alertaMsg = 'Usuario creado correctamente.';
-    }
+    UI.alertaMsg = `Usuario "${usuario}" creado. Ya puede ingresar con ese usuario y la contraseña que definiste.`; UI.alertaTipo='ok';
   }catch(e){
-    UI.alertaMsg = 'Error: '+e.message;
+    UI.alertaMsg = 'Error: '+e.message; UI.alertaTipo='error';
+  }
+  render();
+}
+async function resetearClaveUsuario(id, nombreUsuario){
+  const nueva = window.prompt(`Nueva contraseña para "${nombreUsuario}" (mínimo 6 caracteres):`);
+  if(!nueva) return;
+  if(nueva.length<6){
+    UI.alertaMsg = 'La contraseña tiene que tener al menos 6 caracteres.'; UI.alertaTipo='error'; render(); return;
+  }
+  try{
+    const resp = await fetch('/api/resetear-clave', {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'Authorization': 'Bearer '+SESSION.access_token},
+      body: JSON.stringify({ uid:id, password:nueva })
+    });
+    let data;
+    try{
+      data = await resp.json();
+    }catch(parseErr){
+      throw new Error(`La función del servidor falló (código ${resp.status}) y no devolvió una respuesta válida. Revisá los Runtime Logs en Vercel.`);
+    }
+    if(!resp.ok) throw new Error(data.error||'No se pudo cambiar la contraseña');
+    UI.alertaMsg = `Contraseña actualizada para "${nombreUsuario}".`; UI.alertaTipo='ok';
+  }catch(e){
+    UI.alertaMsg = 'Error: '+e.message; UI.alertaTipo='error';
   }
   render();
 }
 async function eliminarUsuario(id){
-  if(id === SESSION.id){ UI.alertaMsg='No podés eliminar tu propio usuario.'; render(); return; }
+  if(id === SESSION.id){ UI.alertaMsg='No podés eliminar tu propio usuario.'; UI.alertaTipo='error'; render(); return; }
   const perfil = (STATE.perfiles||[]).find(p=>p.id===id);
-  if(perfil && perfil.email===EMAIL_PROTEGIDO){ UI.alertaMsg='Esa cuenta no se puede eliminar desde acá.'; render(); return; }
+  if(perfil && perfil.email===EMAIL_PROTEGIDO){ UI.alertaMsg='Esa cuenta no se puede eliminar desde acá.'; UI.alertaTipo='error'; render(); return; }
   try{
     await db.collection('usuarios').doc(id).delete();
     STATE.perfiles = STATE.perfiles.filter(p=>p.id!==id);
-  }catch(e){ UI.alertaMsg = 'Error: '+e.message; }
+  }catch(e){ UI.alertaMsg = 'Error: '+e.message; UI.alertaTipo='error'; }
   render();
 }
 
